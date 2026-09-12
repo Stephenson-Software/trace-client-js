@@ -1,0 +1,17 @@
+{
+  // Type-checks the one file consumers vendor. Deliberately no @types/node:
+  // if trace-client.ts compiles against ES2022 + DOM alone, it uses nothing
+  // an edge runtime lacks.
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["trace-client.ts"]
+}

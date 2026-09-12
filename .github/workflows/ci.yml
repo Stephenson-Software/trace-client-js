@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      # Type-checks trace-client.ts against ES2022 + DOM only: proof it uses
+      # nothing the Next.js Edge runtime lacks.
+      - run: npm run typecheck
+      - run: npm test
