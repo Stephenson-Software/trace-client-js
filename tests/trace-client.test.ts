@@ -5,7 +5,29 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import * as clientModule from "../trace-client.ts";
 import { TraceClient, TRACE_CLIENT_VERSION, isBot, pagePath } from "../trace-client.ts";
+
+const { REASON_CONFIG, REASON_ENVIRONMENT, REASON_NO_KEY } = TraceClient;
+const environmentOptsOut = (env?: Record<string, string | undefined>) => TraceClient.environmentOptsOut(env);
+
+// The client reads TRACE_USAGE_REPORTING / DO_NOT_TRACK from process.env by
+// default, so a developer's own opt-out must not turn the delivery tests into
+// no-ops. Cleared for the whole file and put back afterwards.
+const OPT_OUT_VARIABLES = ["TRACE_USAGE_REPORTING", "DO_NOT_TRACK"] as const;
+const savedEnvironment: Record<string, string | undefined> = {};
+before(() => {
+  for (const name of OPT_OUT_VARIABLES) {
+    savedEnvironment[name] = process.env[name];
+    delete process.env[name];
+  }
+});
+after(() => {
+  for (const name of OPT_OUT_VARIABLES) {
+    if (savedEnvironment[name] === undefined) delete process.env[name];
+    else process.env[name] = savedEnvironment[name];
+  }
+});
 
 interface Captured {
   path: string;
@@ -305,6 +327,158 @@ describe("TraceClient", () => {
     await sleep(100);
     assert.equal(capture.requests.length, 1);
     assert.deepEqual(log, []);
+  });
+});
+
+describe("0.1.0 compatibility", () => {
+  it("exports exactly the values 0.1.0 did, so re-vendoring needs no change", () => {
+    assert.deepEqual(Object.keys(clientModule).sort(), ["TRACE_CLIENT_VERSION", "TraceClient", "isBot", "pagePath"]);
+  });
+
+  it("keeps the 0.1.0 constructor, report, flush, close and disabled() shapes", async () => {
+    const client = new TraceClient("http://127.0.0.1:9", "MyGame", { key: "k", enabled: true, timeoutMs: 50, fetch, debug: () => {}, env: {} });
+    assert.equal(client.enabled, true);
+    assert.equal(await client.report("startup", { value: 1, tags: { version: "1" } }), undefined);
+    assert.equal(await client.flush(50), undefined);
+    assert.equal(await client.close(50), undefined);
+    assert.equal(TraceClient.disabled().enabled, false);
+    assert.equal(TRACE_CLIENT_VERSION, "0.2.0");
+  });
+});
+
+describe("environment opt-outs", () => {
+  let capture: Capture;
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    capture = new Capture();
+    server = await serve(capture);
+    baseUrl = baseUrlOf(server);
+  });
+
+  afterEach(async () => {
+    capture.release();
+    await stop(server);
+    for (const name of OPT_OUT_VARIABLES) delete process.env[name];
+  });
+
+  it("recognises exactly the documented values, ignoring case and surrounding space", () => {
+    for (const value of ["off", "false", "0", "no", "OFF", " No ", "False"]) {
+      assert.equal(environmentOptsOut({ TRACE_USAGE_REPORTING: value }), true, `TRACE_USAGE_REPORTING=${value}`);
+    }
+    for (const value of ["1", "true", "yes", "TRUE", " Yes "]) {
+      assert.equal(environmentOptsOut({ DO_NOT_TRACK: value }), true, `DO_NOT_TRACK=${value}`);
+    }
+    for (const value of ["", "on", "true", "1", "yes", "disabled"]) {
+      assert.equal(environmentOptsOut({ TRACE_USAGE_REPORTING: value }), false, `TRACE_USAGE_REPORTING=${value}`);
+    }
+    for (const value of ["", "0", "false", "no", "off"]) {
+      assert.equal(environmentOptsOut({ DO_NOT_TRACK: value }), false, `DO_NOT_TRACK=${value}`);
+    }
+    assert.equal(environmentOptsOut({}), false);
+  });
+
+  it("sends nothing and reports \"environment\" when TRACE_USAGE_REPORTING or DO_NOT_TRACK opts out", async () => {
+    const clients = [
+      new TraceClient(baseUrl, "MyGame", { key: "k", env: { TRACE_USAGE_REPORTING: "off" } }),
+      new TraceClient(baseUrl, "MyGame", { key: "k", env: { DO_NOT_TRACK: "1" } }),
+    ];
+    for (const client of clients) {
+      assert.equal(client.enabled, false);
+      assert.equal(client.disabledReason, REASON_ENVIRONMENT);
+      await client.report("startup");
+      await client.close();
+    }
+    await sleep(200);
+    assert.deepEqual(capture.requests, []);
+  });
+
+  it("checks the environment before enabled and the key", () => {
+    const off = { TRACE_USAGE_REPORTING: "off" };
+    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "k", enabled: false, env: off }).disabledReason, REASON_ENVIRONMENT);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { env: off }).disabledReason, REASON_ENVIRONMENT);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { enabled: false, env: {} }).disabledReason, REASON_CONFIG);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "  ", env: {} }).disabledReason, REASON_NO_KEY);
+    assert.equal(TraceClient.disabled().disabledReason, REASON_CONFIG);
+  });
+
+  it("reports null as the reason when on, and keeps the build reason after close()", async () => {
+    const on = new TraceClient(baseUrl, "MyGame", { key: "k", env: {} });
+    assert.equal(on.disabledReason, null);
+    assert.equal(on.enabled, true);
+    await on.close();
+    assert.equal(on.enabled, false);
+    assert.equal(on.disabledReason, null, "close() is not a reason the client was built off");
+    const off = new TraceClient(baseUrl, "MyGame", { key: "k", enabled: false });
+    await off.close();
+    assert.equal(off.disabledReason, REASON_CONFIG);
+  });
+
+  it("reads process.env by default", async () => {
+    process.env.TRACE_USAGE_REPORTING = "off";
+    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "k" }).disabledReason, REASON_ENVIRONMENT);
+    delete process.env.TRACE_USAGE_REPORTING;
+    process.env.DO_NOT_TRACK = "true";
+    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "k" }).disabledReason, REASON_ENVIRONMENT);
+    delete process.env.DO_NOT_TRACK;
+    const client = new TraceClient(baseUrl, "MyGame", { key: "k" });
+    assert.equal(client.disabledReason, null);
+    await client.report("startup");
+    assert.equal(capture.requests.length, 1);
+    await client.close();
+  });
+
+  it("an explicit env replaces process.env rather than adding to it", () => {
+    process.env.TRACE_USAGE_REPORTING = "off";
+    const client = new TraceClient(baseUrl, "MyGame", { key: "k", env: {} });
+    assert.equal(client.disabledReason, null);
+    assert.equal(environmentOptsOut(), true);
+    assert.equal(environmentOptsOut({}), false);
+  });
+
+  it("works in a runtime with no process, or whose environment cannot be read", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
+    assert.ok(descriptor, "Node defines globalThis.process");
+    const swapIn = (value: unknown) => Object.defineProperty(globalThis, "process", { value, configurable: true, writable: true });
+    const built: TraceClient[] = [];
+    let noProcess: boolean;
+    let throwingEnv: boolean;
+    try {
+      // Built synchronously while swapped out, so nothing else runs meanwhile.
+      swapIn(undefined);
+      noProcess = environmentOptsOut();
+      built.push(new TraceClient(baseUrl, "MyGame", { key: "k" }));
+      swapIn({
+        get env(): never {
+          throw new Error("env access denied");
+        },
+      });
+      throwingEnv = environmentOptsOut();
+      built.push(new TraceClient(baseUrl, "MyGame", { key: "k" }));
+      swapIn({});
+      built.push(new TraceClient(baseUrl, "MyGame", { key: "k" }));
+    } finally {
+      Object.defineProperty(globalThis, "process", descriptor);
+    }
+    assert.equal(noProcess, false);
+    assert.equal(throwingEnv, false);
+    for (const client of built) {
+      assert.equal(client.disabledReason, null);
+      await client.report("startup");
+      await client.close();
+    }
+    assert.equal(capture.requests.length, built.length);
+  });
+
+  it("an env whose lookups throw opts nothing out and does not escape", () => {
+    const hostile = new Proxy({}, {
+      get(): never {
+        throw new Error("no");
+      },
+    });
+    assert.equal(environmentOptsOut(hostile), false);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "k", env: hostile }).disabledReason, null);
   });
 });
 

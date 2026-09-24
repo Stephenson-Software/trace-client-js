@@ -1,16 +1,35 @@
 /**
- * trace-client 0.1.0 -- https://github.com/Stephenson-Software/trace-client-js
+ * trace-client 0.2.0 -- https://github.com/Stephenson-Software/trace-client-js
  *
  * One call to report that a program was used. Copy this file into a project
  * as is; there is nothing else to add. Zero dependencies and no Node-only
- * APIs -- only `fetch`, `AbortController`, `setTimeout` and `URL` -- so it
- * runs in Node 18+, in the Next.js Edge runtime, and in any other runtime
- * that has those four.
+ * APIs -- only `fetch`, `AbortController`, `setTimeout` and `URL`, plus
+ * `process.env` when the runtime has one -- so it runs in Node 18+, in the
+ * Next.js Edge runtime, and in any other runtime that has those four.
  *
  * MIT licensed. Keep this header when vendoring so the file can be found again.
  */
 
-export const TRACE_CLIENT_VERSION = "0.1.0";
+export const TRACE_CLIENT_VERSION = "0.2.0";
+
+// Everything new in 0.2.0 hangs off TraceClient (static members) rather than
+// being a new top-level export, so the file's exported values stay exactly
+// those of 0.1.0 -- TRACE_CLIENT_VERSION, TraceClient, pagePath, isBot -- and
+// a consumer that re-vendors it (or derives CommonJS from it) needs no change.
+
+/** Why a client reports nothing; see {@link TraceClient.disabledReason}. First match wins, in this order. */
+export type DisabledReason = "environment" | "config" | "no key";
+
+/** An environment to read the opt-outs from: `process.env`, or a stand-in. */
+export type Environment = Readonly<Record<string, string | undefined>>;
+
+const OFF_VALUES = ["off", "false", "0", "no"];
+const DO_NOT_TRACK_VALUES = ["1", "true", "yes"];
+
+// Declared here rather than taken from @types/node so the file still
+// type-checks against ES2022 + DOM alone; at runtime `process` may simply not
+// exist (a browser-like edge runtime), which processEnvironment() allows for.
+declare const process: { env?: Record<string, string | undefined> } | undefined;
 
 export interface TraceClientOptions {
   /** The program's write key. Blank or missing yields a client that does nothing. */
@@ -23,6 +42,13 @@ export interface TraceClientOptions {
   fetch?: typeof fetch;
   /** Receives one line per dropped report. Default: silence. */
   debug?: (message: string) => void;
+  /**
+   * Where to read `TRACE_USAGE_REPORTING` and `DO_NOT_TRACK` from. Default:
+   * `process.env` when the runtime has one, otherwise nothing. Pass the
+   * handler's `env` in a runtime that has no `process` (Cloudflare Workers),
+   * or a stand-in in tests.
+   */
+  env?: Environment;
 }
 
 export interface ReportOptions {
@@ -51,14 +77,21 @@ export interface ReportOptions {
  *   unreachable for a week costs a few kilobytes, not the host's memory.
  *
  * Reporting is opt-out: `enabled: false`, or no key, yields a client that does
- * nothing and costs nothing. Programs that run on other people's machines
- * should expose that switch in their settings and say so once.
+ * nothing and costs nothing. So does the environment: the constructor checks
+ * `TRACE_USAGE_REPORTING=off` and `DO_NOT_TRACK=1` before it looks at
+ * `enabled`, so a user can switch off every trace-reporting program at once.
+ * {@link disabledReason} says which of those applied (`"environment"`,
+ * `"config"` or `"no key"`; `null` when on) so the program can say so in its
+ * notice. Programs that run on other people's machines should expose that
+ * switch in their settings and say so once, pointing at
+ * https://github.com/Stephenson-Software/trace#usage-reporting.
  *
  * ```ts
  * const trace = new TraceClient("https://trace.example.org", "my-site", {
  *   key: process.env.USAGE_REPORTING_KEY,
  *   enabled: process.env.USAGE_REPORTING_ENABLED !== "false",
  * });
+ * if (!trace.enabled) console.log(`Usage reporting is off (${trace.disabledReason}).`);
  * trace.report("startup", { tags: { version: "1.4.0" } });
  * ...
  * await trace.close(); // on shutdown
@@ -68,6 +101,43 @@ export class TraceClient {
   static readonly IN_FLIGHT_CAPACITY = 256;
   static readonly TIMEOUT_MS = 5000;
 
+  /**
+   * Environment variables that turn reporting off for every program using a
+   * trace client, checked before the program's own setting:
+   * `TRACE_USAGE_REPORTING=off` (also `false`, `0`, `no`; case and
+   * surrounding space do not matter) or `DO_NOT_TRACK=1` (also `true`, `yes`;
+   * see https://consoledonottrack.com). Any other value, including an empty
+   * one, leaves the program's own setting in charge.
+   */
+  static readonly ENV_TRACE_USAGE_REPORTING = "TRACE_USAGE_REPORTING";
+  static readonly ENV_DO_NOT_TRACK = "DO_NOT_TRACK";
+
+  /** {@link disabledReason} when `TRACE_USAGE_REPORTING` or `DO_NOT_TRACK` opted out. */
+  static readonly REASON_ENVIRONMENT = "environment";
+  /** {@link disabledReason} when the program passed `enabled: false`. */
+  static readonly REASON_CONFIG = "config";
+  /** {@link disabledReason} when the key was missing or blank. */
+  static readonly REASON_NO_KEY = "no key";
+
+  /**
+   * Whether the environment asks for usage reporting to be off, via
+   * `TRACE_USAGE_REPORTING=off` or `DO_NOT_TRACK=1`. Reads `env` when given,
+   * otherwise `process.env` if the runtime has one; never throws, and a
+   * runtime without an environment opts nothing out.
+   */
+  static environmentOptsOut(env?: Environment): boolean {
+    let trace: unknown;
+    let doNotTrack: unknown;
+    try {
+      const source = env ?? processEnvironment();
+      trace = source[TraceClient.ENV_TRACE_USAGE_REPORTING];
+      doNotTrack = source[TraceClient.ENV_DO_NOT_TRACK];
+    } catch {
+      return false; // an environment that cannot be read opts nothing out
+    }
+    return matches(trace, OFF_VALUES) || matches(doNotTrack, DO_NOT_TRACK_VALUES);
+  }
+
   private readonly endpoint: string;
   private readonly application: string;
   private readonly key: string;
@@ -75,6 +145,7 @@ export class TraceClient {
   private readonly fetchImpl: typeof fetch | undefined;
   private readonly debug: ((message: string) => void) | undefined;
   private readonly inFlight = new Set<Promise<void>>();
+  private readonly reason: DisabledReason | null;
   private active: boolean;
 
   constructor(baseUrl: string, application: string, options: TraceClientOptions = {}) {
@@ -94,7 +165,17 @@ export class TraceClient {
         : TraceClient.TIMEOUT_MS;
     this.fetchImpl = options.fetch;
     this.debug = options.debug;
-    this.active = options.enabled !== false && this.key !== "";
+    // Decided once, here: the environment, then the program's switch, then the key.
+    if (TraceClient.environmentOptsOut(options.env)) {
+      this.reason = TraceClient.REASON_ENVIRONMENT;
+    } else if (options.enabled === false) {
+      this.reason = TraceClient.REASON_CONFIG;
+    } else if (this.key === "") {
+      this.reason = TraceClient.REASON_NO_KEY;
+    } else {
+      this.reason = null;
+    }
+    this.active = this.reason === null;
   }
 
   /** A client that reports nothing. Useful as a default before settings are read. */
@@ -102,9 +183,22 @@ export class TraceClient {
     return new TraceClient("http://disabled.invalid", "disabled", { enabled: false });
   }
 
-  /** Whether {@link report} will actually send anything. */
+  /**
+   * Whether {@link report} will actually send anything. `false` after
+   * {@link close} too; {@link disabledReason} keeps the reason the client was
+   * built off, if it was.
+   */
   get enabled(): boolean {
     return this.active;
+  }
+
+  /**
+   * Why this client reports nothing: `"environment"` (`TRACE_USAGE_REPORTING`
+   * / `DO_NOT_TRACK`), `"config"` (`enabled: false`) or `"no key"`; `null`
+   * when it reports. Fixed at construction; {@link close} does not change it.
+   */
+  get disabledReason(): DisabledReason | null {
+    return this.reason;
   }
 
   /**
@@ -244,6 +338,28 @@ export function isBot(userAgent: string | null | undefined): boolean {
 }
 
 // -- helpers ----------------------------------------------------------------
+
+/**
+ * The two opt-out variables from `process.env`, or an empty environment where
+ * there is no `process` (or reading it throws, as a permission-gated runtime
+ * may). Each is read by its literal name, which is what lets bundlers such as
+ * Next.js inline it for the Edge runtime.
+ */
+function processEnvironment(): Environment {
+  try {
+    if (typeof process === "undefined" || !process || !process.env) return {};
+    return {
+      TRACE_USAGE_REPORTING: process.env.TRACE_USAGE_REPORTING,
+      DO_NOT_TRACK: process.env.DO_NOT_TRACK,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function matches(value: unknown, accepted: readonly string[]): boolean {
+  return typeof value === "string" && accepted.includes(value.trim().toLowerCase());
+}
 
 function serialize(
   application: string,

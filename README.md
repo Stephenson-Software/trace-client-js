@@ -6,8 +6,9 @@ A zero-dependency TypeScript client for a [trace](https://trace.danielstephenson
 server — the central place a fleet of programs reports usage events to. The
 whole library is one file, `trace-client.ts`, and the integration on the
 program side is meant to stay one call. It uses only `fetch`,
-`AbortController`, `setTimeout` and `URL`, so it runs in Node 18+, in the
-Next.js Edge runtime, and anywhere else that has those four. The Python and
+`AbortController`, `setTimeout` and `URL` (plus `process.env` where the
+runtime has one), so it runs in Node 18+, in the Next.js Edge runtime, and
+anywhere else that has those four. The Python and
 Java counterparts are
 [trace-client-python](https://github.com/Stephenson-Software/trace-client-python)
 and [trace-client-java](https://github.com/Stephenson-Software/trace-client-java);
@@ -41,6 +42,50 @@ that does nothing and costs nothing (`TraceClient.disabled()` is a ready-made
 one). A program that runs on other people's machines should expose that switch
 in its settings — and say so once, so whoever runs it knows it is on and where
 to turn it off.
+
+## Turning it off from the environment
+
+Two environment variables switch off **every** program that uses a trace
+client — this one, trace-client-python and trace-client-java alike — and
+they are checked before the program's own `enabled` setting and before the
+key:
+
+| Variable | Values that turn reporting off |
+|---|---|
+| `TRACE_USAGE_REPORTING` | `off`, `false`, `0`, `no` |
+| `DO_NOT_TRACK` | `1`, `true`, `yes` ([consoledonottrack.com](https://consoledonottrack.com)) |
+
+Case and surrounding space are ignored; any other value, or none, leaves the
+program's own setting in charge. The client reads them from `process.env`
+when the runtime has one (by their literal names, so Next.js can inline them
+into the Edge runtime); a runtime without `process`, or whose environment
+cannot be read, simply opts nothing out. Pass `env` to use another source:
+
+```ts
+// Cloudflare Workers and other runtimes that hand the environment to the handler
+const trace = new TraceClient(endpoint, "my-worker", { key: env.USAGE_REPORTING_KEY, env });
+```
+
+`disabledReason` says why a client sends nothing — the first that applies, in
+this order — so a program can say so in its startup notice:
+
+| `disabledReason` | Cause |
+|---|---|
+| `"environment"` | `TRACE_USAGE_REPORTING` or `DO_NOT_TRACK` above |
+| `"config"` | `enabled: false` |
+| `"no key"` | the key was missing or blank |
+| `null` | the client reports |
+
+```ts
+console.log(trace.enabled
+  ? "Usage reporting is on. Details: https://github.com/Stephenson-Software/trace#usage-reporting"
+  : `Usage reporting is off (${trace.disabledReason}).`);
+```
+
+The reason is fixed when the client is built: `close()` turns `enabled` off
+but leaves `disabledReason` as it was. `TraceClient.environmentOptsOut(env?)`
+answers the environment question on its own, for a program that wants to
+decide before it builds a client (to skip writing a settings file, say).
 
 ## Getting it
 
@@ -99,7 +144,8 @@ capped at 200 characters), `isBot()` keeps crawlers, link previewers and
 uptime monitors out of the count, and the middleware above never reads
 anything else off the request.
 
-**The opt-out.** Three environment variables, all optional:
+**The opt-out.** Three environment variables, all optional, on top of
+`TRACE_USAGE_REPORTING` / `DO_NOT_TRACK` (which the client checks by itself):
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -114,7 +160,7 @@ site can flip `USAGE_REPORTING_ENABLED=false` and nothing is sent.
 ## The wire format
 
 `POST {baseUrl}/api/metrics` with `Content-Type: application/json`,
-`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.1.0 (<application>)`
+`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.2.0 (<application>)`
 and a body of
 
 ```json

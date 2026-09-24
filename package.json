@@ -1,6 +1,6 @@
 {
   "name": "trace-client-js",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "One-file usage-reporting client for trace, for Node and edge runtimes (vendor it, bStats-style)",
   "type": "module",
