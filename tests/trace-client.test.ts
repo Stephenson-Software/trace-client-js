@@ -269,6 +269,126 @@ describe("TraceClient", () => {
     assert.throws(() => new TraceClient(baseUrl, "   "));
   });
 
+  it("names the bad argument when construction fails", () => {
+    assert.throws(() => new TraceClient("", "MyGame"), /baseUrl/);
+    assert.throws(() => new TraceClient(undefined as unknown as string, "MyGame"), /baseUrl/);
+    assert.throws(() => new TraceClient(baseUrl, ""), /application/);
+    assert.throws(() => new TraceClient(baseUrl, 42 as unknown as string), /application/);
+  });
+
+  it("falls back to the default timeout when timeoutMs is not a positive finite number", async () => {
+    // Used as-is, each of these would abort the request before the stub answers.
+    for (const timeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      let aborted: boolean | undefined;
+      const client = new TraceClient(baseUrl, "MyGame", {
+        key: "k",
+        timeoutMs,
+        debug,
+        fetch: (async (_url: unknown, init?: RequestInit) => {
+          await sleep(100);
+          aborted = init?.signal?.aborted;
+          return new Response(null, { status: 201 });
+        }) as typeof fetch,
+      });
+      await client.report("startup");
+      assert.equal(aborted, false, `timeoutMs=${timeoutMs} must fall back to ${TraceClient.TIMEOUT_MS}`);
+      await client.close();
+    }
+    assert.deepEqual(log, []);
+  });
+
+  it("drops null and undefined tags, coerces other values to strings, and omits tags left empty", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { key: "k" });
+    const loose = (tags: Record<string, unknown>) => tags as Record<string, string>;
+    await client.report("mixed", {
+      value: Number.POSITIVE_INFINITY,
+      tags: loose({ keep: "x", gone: null, missing: undefined, count: 3, flag: true }),
+    });
+    await client.report("empty", { value: Number.NEGATIVE_INFINITY, tags: loose({ gone: null, missing: undefined }) });
+    await client.report("zero", { value: 0 });
+    assert.deepEqual(JSON.parse(capture.requests[0].body), {
+      application: "MyGame",
+      name: "mixed",
+      tags: { keep: "x", count: "3", flag: "true" },
+    });
+    assert.deepEqual(JSON.parse(capture.requests[1].body), { application: "MyGame", name: "empty" });
+    assert.deepEqual(JSON.parse(capture.requests[2].body), { application: "MyGame", name: "zero", value: 0 });
+    await client.close();
+  });
+
+  it("drops a report whose tags cannot be serialized, without throwing", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { key: "k", debug });
+    const hostile = {
+      toString(): never {
+        throw new Error("no string for you");
+      },
+    };
+    await client.report("startup", { tags: { bad: hostile as unknown as string } }); // must resolve
+    await client.close();
+    assert.deepEqual(capture.requests, []);
+    assert.ok(
+      log.some((line) => line.includes("could not serialize startup") && line.includes("no string for you")),
+      log.join("\n"),
+    );
+  });
+
+  it("treats any 2xx as success, even with an unreadable body", async () => {
+    capture.replyStatus = 202;
+    const answered = new TraceClient(baseUrl, "MyGame", { key: "k", debug });
+    await answered.report("startup");
+    await answered.close();
+    assert.equal(capture.requests.length, 1);
+    const unreadable = new TraceClient(baseUrl, "MyGame", {
+      key: "k",
+      debug,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.reject(new Error("body gone")),
+      })) as unknown as typeof fetch,
+    });
+    await unreadable.report("startup"); // must resolve
+    await unreadable.close();
+    assert.deepEqual(log, [], "a 2xx is delivered; an unreadable body is not a failure");
+  });
+
+  it("names the cause of a failed delivery in the debug line", async () => {
+    const failures: unknown[] = [
+      new Error("fetch failed", { cause: new Error("connect ECONNREFUSED") }),
+      "plain string failure",
+    ];
+    for (const failure of failures) {
+      const client = new TraceClient(baseUrl, "MyGame", {
+        key: "k",
+        debug,
+        fetch: (async () => {
+          throw failure;
+        }) as typeof fetch,
+      });
+      await client.report("startup"); // must resolve
+      await client.close();
+    }
+    assert.ok(log.some((line) => line.includes("Error: fetch failed (connect ECONNREFUSED)")), log.join("\n"));
+    assert.ok(log.some((line) => line.includes("plain string failure")), log.join("\n"));
+  });
+
+  it("flush() and close() treat a negative or non-finite timeout as zero", async () => {
+    capture.hang = true;
+    const client = new TraceClient(baseUrl, "MyGame", { key: "k", timeoutMs: 3000 });
+    client.report("startup");
+    assert.ok(await capture.arrived(1));
+    for (const timeoutMs of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const before = Date.now();
+      await client.flush(timeoutMs);
+      const elapsed = Date.now() - before;
+      assert.ok(elapsed < 1500, `flush(${timeoutMs}) took ${elapsed}ms; it must not wait on the hung request`);
+    }
+    const before = Date.now();
+    await client.close(-1);
+    const elapsed = Date.now() - before;
+    assert.ok(elapsed < 1500, `close(-1) took ${elapsed}ms; it must not wait on the hung request`);
+  });
+
   it("does not let a throwing debug sink or a broken fetch escape", async () => {
     const client = new TraceClient(baseUrl, "MyGame", {
       key: "k",
@@ -500,6 +620,12 @@ describe("pagePath", () => {
     const long = "/" + "x".repeat(500);
     assert.equal(pagePath(long).length, 200);
     assert.equal(pagePath(long), "/" + "x".repeat(199));
+  });
+
+  it("falls back to the root for a non-string or an unparseable absolute URL", () => {
+    assert.equal(pagePath(42 as unknown as string), "/");
+    assert.equal(pagePath(null as unknown as string), "/");
+    assert.equal(pagePath("http://[not-a-host/page?q=1"), "/");
   });
 });
 
