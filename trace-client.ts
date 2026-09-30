@@ -1,5 +1,5 @@
 /**
- * trace-client 0.2.0 -- https://github.com/Stephenson-Software/trace-client-js
+ * trace-client 0.3.0 -- https://github.com/Stephenson-Software/trace-client-js
  *
  * One call to report that a program was used. Copy this file into a project
  * as is; there is nothing else to add. Zero dependencies and no Node-only
@@ -10,12 +10,12 @@
  * MIT licensed. Keep this header when vendoring so the file can be found again.
  */
 
-export const TRACE_CLIENT_VERSION = "0.2.0";
+export const TRACE_CLIENT_VERSION = "0.3.0";
 
-// Everything new in 0.2.0 hangs off TraceClient (static members) rather than
-// being a new top-level export, so the file's exported values stay exactly
-// those of 0.1.0 -- TRACE_CLIENT_VERSION, TraceClient, pagePath, isBot -- and
-// a consumer that re-vendors it (or derives CommonJS from it) needs no change.
+// Everything added since 0.1.0 hangs off TraceClient (static members) rather
+// than being a new top-level export, so the file's exported values stay
+// exactly those of 0.1.0 -- TRACE_CLIENT_VERSION, TraceClient, pagePath,
+// isBot. The one breaking change is 0.3.0's required `version` option.
 
 /** Why a client reports nothing; see {@link TraceClient.disabledReason}. First match wins, in this order. */
 export type DisabledReason = "environment" | "config" | "no key";
@@ -32,6 +32,12 @@ const DO_NOT_TRACK_VALUES = ["1", "true", "yes"];
 declare const process: { env?: Record<string, string | undefined> } | undefined;
 
 export interface TraceClientOptions {
+  /**
+   * The program's own version, required. Sent as the tag `version` on every
+   * event; an event's own `version` tag wins. Trimmed; blank, missing, or
+   * longer than {@link TraceClient.MAX_VERSION_LENGTH} characters throws.
+   */
+  version: string;
   /** The program's write key. Blank or missing yields a client that does nothing. */
   key?: string;
   /** The opt-out switch. `false` yields a client that does nothing. Default `true`. */
@@ -86,13 +92,19 @@ export interface ReportOptions {
  * switch in their settings and say so once, pointing at
  * https://github.com/Stephenson-Software/trace#usage-reporting.
  *
+ * Every event carries the program's own version as the tag `version` -- the
+ * required `version` option -- so a `page-view` or `command` event can be
+ * tied to a release as well as a `startup` one. An event's own `version` tag
+ * wins over it.
+ *
  * ```ts
  * const trace = new TraceClient("https://trace.example.org", "my-site", {
+ *   version: "1.4.0",
  *   key: process.env.USAGE_REPORTING_KEY,
  *   enabled: process.env.USAGE_REPORTING_ENABLED !== "false",
  * });
  * if (!trace.enabled) console.log(`Usage reporting is off (${trace.disabledReason}).`);
- * trace.report("startup", { tags: { version: "1.4.0" } });
+ * trace.report("startup"); // tagged version=1.4.0
  * ...
  * await trace.close(); // on shutdown
  * ```
@@ -100,6 +112,8 @@ export interface ReportOptions {
 export class TraceClient {
   static readonly IN_FLIGHT_CAPACITY = 256;
   static readonly TIMEOUT_MS = 5000;
+  /** The longest program version accepted, after trimming. */
+  static readonly MAX_VERSION_LENGTH = 255;
 
   /**
    * Environment variables that turn reporting off for every program using a
@@ -140,6 +154,7 @@ export class TraceClient {
 
   private readonly endpoint: string;
   private readonly application: string;
+  private readonly version: string;
   private readonly key: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch | undefined;
@@ -148,13 +163,21 @@ export class TraceClient {
   private readonly reason: DisabledReason | null;
   private active: boolean;
 
-  constructor(baseUrl: string, application: string, options: TraceClientOptions = {}) {
+  constructor(baseUrl: string, application: string, options: TraceClientOptions) {
     if (typeof baseUrl !== "string" || !baseUrl.trim()) {
       throw new Error("baseUrl is required");
     }
     if (typeof application !== "string" || !application.trim()) {
       throw new Error("application is required");
     }
+    const version = options?.version;
+    if (typeof version !== "string" || !version.trim()) {
+      throw new Error("version is required");
+    }
+    if (version.trim().length > TraceClient.MAX_VERSION_LENGTH) {
+      throw new Error(`version is longer than ${TraceClient.MAX_VERSION_LENGTH} characters`);
+    }
+    this.version = version.trim();
     this.endpoint = baseUrl.trim().replace(/\/+$/, "") + "/api/metrics";
     this.application = application.trim();
     this.key = (options.key ?? "").trim();
@@ -180,7 +203,7 @@ export class TraceClient {
 
   /** A client that reports nothing. Useful as a default before settings are read. */
   static disabled(): TraceClient {
-    return new TraceClient("http://disabled.invalid", "disabled", { enabled: false });
+    return new TraceClient("http://disabled.invalid", "disabled", { version: "disabled", enabled: false });
   }
 
   /**
@@ -217,7 +240,7 @@ export class TraceClient {
     }
     let body: string;
     try {
-      body = serialize(this.application, name, options.value, options.tags);
+      body = serialize(this.application, name, options.value, withVersion(options.tags, this.version));
     } catch (failure) {
       this.log(`could not serialize ${name}: ${describe(failure)}`);
       return Promise.resolve();
@@ -359,6 +382,25 @@ function processEnvironment(): Environment {
 
 function matches(value: unknown, accepted: readonly string[]): boolean {
   return typeof value === "string" && accepted.includes(value.trim().toLowerCase());
+}
+
+/**
+ * The event's own tags plus `version`, unless the event already carries one.
+ * A copy; the caller's object is never modified. Null and undefined values
+ * are dropped first, so an event whose `version` is null gets the program's.
+ */
+function withVersion(tags: Record<string, string> | undefined, version: string): Record<string, string> {
+  const merged: Record<string, string> = {};
+  if (tags && typeof tags === "object") {
+    for (const [k, v] of Object.entries(tags)) {
+      if (v === null || v === undefined) continue;
+      merged[String(k)] = String(v);
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(merged, "version")) {
+    merged.version = version;
+  }
+  return merged;
 }
 
 function serialize(
