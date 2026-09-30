@@ -18,15 +18,33 @@ all three speak the same wire format and make the same promises.
 import { TraceClient } from "./trace-client";
 
 const trace = new TraceClient("https://trace.danielstephenson.dev", "my-site", {
+  version: "1.4.0", // the program's own version, required -- see below
   key: process.env.USAGE_REPORTING_KEY,
   enabled: process.env.USAGE_REPORTING_ENABLED !== "false",
 });
-trace.report("startup", { tags: { version: "1.4.0" } });
+trace.report("startup"); // tagged version=1.4.0, like every other event
 trace.report("world-load", { value: 2.5, tags: { kind: "procedural" } });
 
 // on shutdown -- also before a short-lived program exits, so the event is sent
 await trace.close();
 ```
+
+## Every event carries the program's version
+
+The `version` option is the program's own version, and it is required
+(`TraceClientOptions.version` is typed `string`, not optional): a missing or
+blank one, or one over 255 characters after trimming, throws an `Error`. It
+is trimmed, then sent as the tag `version` on every event the client sends
+— `startup`, `page-view`, `command`, anything else — so every event can be
+tied to a release, not just `startup`. An event that passes its own
+`version` tag keeps it. The caller's `tags` object is never modified.
+`TraceClient.disabled()` still takes no arguments.
+
+Before 0.3.0, `version` was not an option and only events tagged by hand
+carried a version. Upgrading is one field: pass `version` to the
+constructor (the `version` from your `package.json`, or a constant the build
+fills in). The hand-added `version` tags can then be dropped if you
+like; left in, they still win, so nothing changes on the wire.
 
 ## What `report` promises
 
@@ -63,7 +81,7 @@ cannot be read, simply opts nothing out. Pass `env` to use another source:
 
 ```ts
 // Cloudflare Workers and other runtimes that hand the environment to the handler
-const trace = new TraceClient(endpoint, "my-worker", { key: env.USAGE_REPORTING_KEY, env });
+const trace = new TraceClient(endpoint, "my-worker", { version: "1.4.0", key: env.USAGE_REPORTING_KEY, env });
 ```
 
 `disabledReason` says why a client sends nothing — the first that applies, in
@@ -114,6 +132,7 @@ const trace = new TraceClient(
   process.env.USAGE_REPORTING_ENDPOINT ?? "https://trace.danielstephenson.dev",
   "my-site",
   {
+    version: "1.4.0",
     // The key shipped with the site is an identity, not a secret -- see "Keys".
     key: process.env.USAGE_REPORTING_KEY ?? "tk_my-site_xxxxxxxxxxxxxxxxxxxxxxxx",
     enabled: process.env.USAGE_REPORTING_ENABLED !== "false",
@@ -160,15 +179,16 @@ site can flip `USAGE_REPORTING_ENABLED=false` and nothing is sent.
 ## The wire format
 
 `POST {baseUrl}/api/metrics` with `Content-Type: application/json`,
-`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.2.0 (<application>)`
+`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.3.0 (<application>)`
 and a body of
 
 ```json
-{"application":"my-site","name":"page-view","tags":{"page":"/blog/hello"}}
+{"application":"my-site","name":"page-view","tags":{"page":"/blog/hello","version":"1.4.0"}}
 ```
 
-`value` and `tags` are omitted when not given (`NaN` and infinities count as
-not given). The server assigns the timestamp. Any `2xx` is success; anything
+`value` is omitted when not given (`NaN` and infinities count as not given);
+`tags` always holds at least `version`. The `User-Agent` carries the
+client's version, the `version` tag the program's. The server assigns the timestamp. Any `2xx` is success; anything
 else is passed to `debug` and dropped. A trailing slash on `baseUrl` is
 tolerated.
 

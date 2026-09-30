@@ -4,6 +4,25 @@ All notable changes to this project are recorded here. The version in the
 header comment of `trace-client.ts` is the one consumers vendor; check it
 against this file to see what a re-vendor would bring.
 
+## 0.3.0 — 2026-09-29
+
+Every event carries the program's version, matching trace-client-java 0.4.0.
+**Breaking:** the constructor's options object now requires `version`.
+
+- `new TraceClient(baseUrl, application, { version, ... })`: `version` is the
+  program's own version, typed as required. It is trimmed; missing, blank,
+  or longer than 255 characters (`TraceClient.MAX_VERSION_LENGTH`) throws.
+- Every event — `startup`, `page-view`, `command`, anything — is sent with
+  the tag `version` set to it, so `tags` is never omitted any more. An
+  event's own `version` tag wins; the caller's `tags` object is never
+  modified.
+- `TraceClient.disabled()` is unchanged for callers (it uses an internal
+  placeholder version).
+- The `User-Agent` still carries the client's version:
+  `trace-client-js/0.3.0 (<application>)`.
+- Upgrading from 0.2.0: add `version` to the constructor options. Hand-added
+  `version` tags may be dropped; left in, they still win.
+
 ## 0.2.0 — 2026-09-24
 
 The environment opt-outs the Java and Python clients gained in 0.2.0, so a

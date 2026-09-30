@@ -136,7 +136,7 @@ describe("TraceClient", () => {
   const debug = (message: string) => log.push(message);
 
   it("posts the event to the metrics endpoint with the key, tolerating a trailing slash", async () => {
-    const client = new TraceClient(baseUrl + "/", "MyGame", { key: "k-123", debug });
+    const client = new TraceClient(baseUrl + "/", "MyGame", { version: "1.2.3", key: "k-123", debug });
     await client.report("startup");
     assert.equal(capture.requests.length, 1);
     const request = capture.requests[0];
@@ -144,13 +144,13 @@ describe("TraceClient", () => {
     assert.equal(request.headers.authorization, "Bearer k-123");
     assert.equal(request.headers["content-type"], "application/json");
     assert.equal(request.headers["user-agent"], `trace-client-js/${TRACE_CLIENT_VERSION} (MyGame)`);
-    assert.deepEqual(JSON.parse(request.body), { application: "MyGame", name: "startup" });
+    assert.deepEqual(JSON.parse(request.body), { application: "MyGame", name: "startup", tags: { version: "1.2.3" } });
     assert.deepEqual(log, []);
     await client.close();
   });
 
-  it("omits value when undefined and carries value and tags when given", async () => {
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k" });
+  it("omits value when undefined and carries value and tags when given, plus the program version", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
     await client.report("world-load", { value: 2.5, tags: { seed: "42", size: 'the "big" one' } });
     await client.report("plain", { value: undefined, tags: {} });
     await client.report("nan", { value: Number.NaN });
@@ -158,10 +158,10 @@ describe("TraceClient", () => {
       application: "MyGame",
       name: "world-load",
       value: 2.5,
-      tags: { seed: "42", size: 'the "big" one' },
+      tags: { seed: "42", size: 'the "big" one', version: "1.2.3" },
     });
-    assert.deepEqual(JSON.parse(capture.requests[1].body), { application: "MyGame", name: "plain" });
-    assert.deepEqual(JSON.parse(capture.requests[2].body), { application: "MyGame", name: "nan" });
+    assert.deepEqual(JSON.parse(capture.requests[1].body), { application: "MyGame", name: "plain", tags: { version: "1.2.3" } });
+    assert.deepEqual(JSON.parse(capture.requests[2].body), { application: "MyGame", name: "nan", tags: { version: "1.2.3" } });
     await client.close();
   });
 
@@ -169,7 +169,7 @@ describe("TraceClient", () => {
     const probe = await serve(new Capture());
     const deadUrl = baseUrlOf(probe);
     await stop(probe);
-    const client = new TraceClient(deadUrl, "MyGame", { key: "k", debug });
+    const client = new TraceClient(deadUrl, "MyGame", { version: "1.2.3", key: "k", debug });
     await client.report("startup"); // must resolve, not reject
     assert.ok(log.some((line) => line.includes("could not deliver")), log.join("\n"));
     await client.close();
@@ -177,7 +177,7 @@ describe("TraceClient", () => {
 
   it("never rejects when the server answers 500", async () => {
     capture.replyStatus = 500;
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", debug });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
     await client.report("startup");
     assert.equal(capture.requests.length, 1);
     assert.ok(log.some((line) => line.includes("answered 500")), log.join("\n"));
@@ -186,7 +186,7 @@ describe("TraceClient", () => {
 
   it("never rejects when the server rejects the key", async () => {
     capture.replyStatus = 401;
-    const client = new TraceClient(baseUrl, "MyGame", { key: "revoked", debug });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "revoked", debug });
     await client.report("startup");
     assert.ok(log.some((line) => line.includes("answered 401")), log.join("\n"));
     await client.close();
@@ -194,7 +194,7 @@ describe("TraceClient", () => {
 
   it("gives up within the timeout when the server hangs", async () => {
     capture.hang = true;
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", timeoutMs: 300, debug });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", timeoutMs: 300, debug });
     const before = Date.now();
     await client.report("startup");
     const elapsed = Date.now() - before;
@@ -205,7 +205,7 @@ describe("TraceClient", () => {
 
   it("returns already-started work rather than waiting on the network", async () => {
     capture.hang = true;
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", timeoutMs: 500 });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", timeoutMs: 500 });
     const before = Date.now();
     const work = client.report("startup");
     assert.ok(Date.now() - before < 100, "report() itself must return at once");
@@ -216,7 +216,7 @@ describe("TraceClient", () => {
 
   it("caps requests in flight and drops the rest", async () => {
     capture.hang = true;
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", timeoutMs: 1000, debug });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", timeoutMs: 1000, debug });
     const flood = TraceClient.IN_FLIGHT_CAPACITY * 3;
     const work: Promise<void>[] = [];
     for (let i = 0; i < flood; i++) work.push(client.report("flood"));
@@ -231,7 +231,7 @@ describe("TraceClient", () => {
   });
 
   it("frees a slot once a request settles", async () => {
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", debug });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
     for (let i = 0; i < TraceClient.IN_FLIGHT_CAPACITY + 10; i++) await client.report("one-at-a-time");
     assert.equal(capture.requests.length, TraceClient.IN_FLIGHT_CAPACITY + 10);
     assert.deepEqual(log, []);
@@ -240,9 +240,9 @@ describe("TraceClient", () => {
 
   it("sends nothing when disabled or without a key", async () => {
     const clients = [
-      new TraceClient(baseUrl, "MyGame", { key: "k", enabled: false }),
-      new TraceClient(baseUrl, "MyGame"),
-      new TraceClient(baseUrl, "MyGame", { key: "  " }),
+      new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", enabled: false }),
+      new TraceClient(baseUrl, "MyGame", { version: "1.2.3" }),
+      new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "  " }),
       TraceClient.disabled(),
     ];
     for (const client of clients) {
@@ -255,7 +255,7 @@ describe("TraceClient", () => {
   });
 
   it("ignores a blank name", async () => {
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k" });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
     await client.report("");
     await client.report("   ");
     await client.close();
@@ -263,17 +263,17 @@ describe("TraceClient", () => {
   });
 
   it("rejects a missing baseUrl or application at construction", () => {
-    assert.throws(() => new TraceClient("", "MyGame"));
-    assert.throws(() => new TraceClient("  ", "MyGame"));
-    assert.throws(() => new TraceClient(baseUrl, ""));
-    assert.throws(() => new TraceClient(baseUrl, "   "));
+    assert.throws(() => new TraceClient("", "MyGame", { version: "1.2.3" }));
+    assert.throws(() => new TraceClient("  ", "MyGame", { version: "1.2.3" }));
+    assert.throws(() => new TraceClient(baseUrl, "", { version: "1.2.3" }));
+    assert.throws(() => new TraceClient(baseUrl, "   ", { version: "1.2.3" }));
   });
 
   it("names the bad argument when construction fails", () => {
-    assert.throws(() => new TraceClient("", "MyGame"), /baseUrl/);
-    assert.throws(() => new TraceClient(undefined as unknown as string, "MyGame"), /baseUrl/);
-    assert.throws(() => new TraceClient(baseUrl, ""), /application/);
-    assert.throws(() => new TraceClient(baseUrl, 42 as unknown as string), /application/);
+    assert.throws(() => new TraceClient("", "MyGame", { version: "1.2.3" }), /baseUrl/);
+    assert.throws(() => new TraceClient(undefined as unknown as string, "MyGame", { version: "1.2.3" }), /baseUrl/);
+    assert.throws(() => new TraceClient(baseUrl, "", { version: "1.2.3" }), /application/);
+    assert.throws(() => new TraceClient(baseUrl, 42 as unknown as string, { version: "1.2.3" }), /application/);
   });
 
   it("falls back to the default timeout when timeoutMs is not a positive finite number", async () => {
@@ -281,6 +281,7 @@ describe("TraceClient", () => {
     for (const timeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       let aborted: boolean | undefined;
       const client = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
         key: "k",
         timeoutMs,
         debug,
@@ -297,8 +298,8 @@ describe("TraceClient", () => {
     assert.deepEqual(log, []);
   });
 
-  it("drops null and undefined tags, coerces other values to strings, and omits tags left empty", async () => {
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k" });
+  it("drops null and undefined tags, coerces other values to strings, and leaves only the program version when none remain", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
     const loose = (tags: Record<string, unknown>) => tags as Record<string, string>;
     await client.report("mixed", {
       value: Number.POSITIVE_INFINITY,
@@ -309,15 +310,15 @@ describe("TraceClient", () => {
     assert.deepEqual(JSON.parse(capture.requests[0].body), {
       application: "MyGame",
       name: "mixed",
-      tags: { keep: "x", count: "3", flag: "true" },
+      tags: { keep: "x", count: "3", flag: "true", version: "1.2.3" },
     });
-    assert.deepEqual(JSON.parse(capture.requests[1].body), { application: "MyGame", name: "empty" });
-    assert.deepEqual(JSON.parse(capture.requests[2].body), { application: "MyGame", name: "zero", value: 0 });
+    assert.deepEqual(JSON.parse(capture.requests[1].body), { application: "MyGame", name: "empty", tags: { version: "1.2.3" } });
+    assert.deepEqual(JSON.parse(capture.requests[2].body), { application: "MyGame", name: "zero", value: 0, tags: { version: "1.2.3" } });
     await client.close();
   });
 
   it("drops a report whose tags cannot be serialized, without throwing", async () => {
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", debug });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
     const hostile = {
       toString(): never {
         throw new Error("no string for you");
@@ -334,11 +335,12 @@ describe("TraceClient", () => {
 
   it("treats any 2xx as success, even with an unreadable body", async () => {
     capture.replyStatus = 202;
-    const answered = new TraceClient(baseUrl, "MyGame", { key: "k", debug });
+    const answered = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
     await answered.report("startup");
     await answered.close();
     assert.equal(capture.requests.length, 1);
     const unreadable = new TraceClient(baseUrl, "MyGame", {
+      version: "1.2.3",
       key: "k",
       debug,
       fetch: (async () => ({
@@ -359,6 +361,7 @@ describe("TraceClient", () => {
     ];
     for (const failure of failures) {
       const client = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
         key: "k",
         debug,
         fetch: (async () => {
@@ -374,7 +377,7 @@ describe("TraceClient", () => {
 
   it("flush() and close() treat a negative or non-finite timeout as zero", async () => {
     capture.hang = true;
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", timeoutMs: 3000 });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", timeoutMs: 3000 });
     client.report("startup");
     assert.ok(await capture.arrived(1));
     for (const timeoutMs of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
@@ -391,6 +394,7 @@ describe("TraceClient", () => {
 
   it("does not let a throwing debug sink or a broken fetch escape", async () => {
     const client = new TraceClient(baseUrl, "MyGame", {
+      version: "1.2.3",
       key: "k",
       fetch: (() => {
         throw new Error("no network here");
@@ -406,7 +410,7 @@ describe("TraceClient", () => {
   it("delivers a report followed by an immediate close()", async () => {
     // A CLI reports once and exits at once. close() must drain what is in flight.
     for (let i = 0; i < 30; i++) {
-      const client = new TraceClient(baseUrl, "MyCli", { key: "k" });
+      const client = new TraceClient(baseUrl, "MyCli", { version: "1.2.3", key: "k" });
       client.report("startup", { tags: { run: String(i) } });
       await client.close();
     }
@@ -415,7 +419,7 @@ describe("TraceClient", () => {
 
   it("close() returns within the timeout when the server hangs", async () => {
     capture.hang = true;
-    const client = new TraceClient(baseUrl, "MyCli", { key: "k" });
+    const client = new TraceClient(baseUrl, "MyCli", { version: "1.2.3", key: "k" });
     client.report("startup");
     const before = Date.now();
     await client.close(500);
@@ -423,7 +427,7 @@ describe("TraceClient", () => {
   });
 
   it("flush() waits for in-flight work and is bounded too", async () => {
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k" });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
     client.report("a");
     client.report("b");
     await client.flush();
@@ -437,8 +441,71 @@ describe("TraceClient", () => {
     await client.close();
   });
 
+  it("rejects a missing, blank or overlong version at construction", () => {
+    const withOptions = (options: unknown) => () => new TraceClient(baseUrl, "MyGame", options as { version: string });
+    assert.throws(withOptions(undefined), /version is required/);
+    assert.throws(withOptions({}), /version is required/);
+    assert.throws(withOptions({ key: "k" }), /version is required/);
+    assert.throws(withOptions({ version: "" }), /version is required/);
+    assert.throws(withOptions({ version: "   " }), /version is required/);
+    assert.throws(withOptions({ version: 3 }), /version is required/);
+    const longest = "9".repeat(TraceClient.MAX_VERSION_LENGTH);
+    assert.throws(withOptions({ version: longest + "9" }), /longer than 255/);
+    // The limit applies after trimming, so surrounding space does not count.
+    assert.doesNotThrow(withOptions({ version: ` ${longest} ` }));
+  });
+
+  it("tags every event with the program version, trimmed", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: " 2.0.0-SNAPSHOT ", key: "k" });
+    await client.report("command", { tags: { name: "home" } });
+    await client.report("page-view", { value: 1 });
+    await client.report("tool-call", { tags: { tool: "search", version: null as unknown as string } });
+    assert.deepEqual(JSON.parse(capture.requests[0].body), {
+      application: "MyGame",
+      name: "command",
+      tags: { name: "home", version: "2.0.0-SNAPSHOT" },
+    });
+    assert.deepEqual(JSON.parse(capture.requests[1].body), {
+      application: "MyGame",
+      name: "page-view",
+      value: 1,
+      tags: { version: "2.0.0-SNAPSHOT" },
+    });
+    assert.deepEqual(
+      JSON.parse(capture.requests[2].body).tags,
+      { tool: "search", version: "2.0.0-SNAPSHOT" },
+      "a null version tag is dropped, so the program version fills it",
+    );
+    await client.close();
+  });
+
+  it("lets an event's own version tag win over the program version", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
+    await client.report("startup", { tags: { version: "9.9.9" } });
+    assert.deepEqual(JSON.parse(capture.requests[0].body), {
+      application: "MyGame",
+      name: "startup",
+      tags: { version: "9.9.9" },
+    });
+    await client.close();
+  });
+
+  it("never modifies the caller's tags object", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
+    const tags = Object.freeze({ name: "home" }) as Record<string, string>;
+    const unfrozen: Record<string, string> = { name: "home" };
+    await client.report("command", { tags });
+    await client.report("command", { tags: unfrozen });
+    assert.deepEqual(unfrozen, { name: "home" }, "the caller's object must not gain a version");
+    assert.equal(capture.requests.length, 2, "a frozen tags object must not stop the report");
+    for (const request of capture.requests) {
+      assert.deepEqual(JSON.parse(request.body).tags, { name: "home", version: "1.2.3" });
+    }
+    await client.close();
+  });
+
   it("report() after close() is a no-op, and close() is idempotent", async () => {
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", debug });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
     await client.report("startup");
     await client.close();
     await client.close();
@@ -450,19 +517,19 @@ describe("TraceClient", () => {
   });
 });
 
-describe("0.1.0 compatibility", () => {
-  it("exports exactly the values 0.1.0 did, so re-vendoring needs no change", () => {
+describe("API shape", () => {
+  it("exports exactly the values 0.1.0 did", () => {
     assert.deepEqual(Object.keys(clientModule).sort(), ["TRACE_CLIENT_VERSION", "TraceClient", "isBot", "pagePath"]);
   });
 
-  it("keeps the 0.1.0 constructor, report, flush, close and disabled() shapes", async () => {
-    const client = new TraceClient("http://127.0.0.1:9", "MyGame", { key: "k", enabled: true, timeoutMs: 50, fetch, debug: () => {}, env: {} });
+  it("keeps the constructor, report, flush, close and disabled() shapes, with version now required", async () => {
+    const client = new TraceClient("http://127.0.0.1:9", "MyGame", { version: "1.2.3", key: "k", enabled: true, timeoutMs: 50, fetch, debug: () => {}, env: {} });
     assert.equal(client.enabled, true);
     assert.equal(await client.report("startup", { value: 1, tags: { version: "1" } }), undefined);
     assert.equal(await client.flush(50), undefined);
     assert.equal(await client.close(50), undefined);
     assert.equal(TraceClient.disabled().enabled, false);
-    assert.equal(TRACE_CLIENT_VERSION, "0.2.0");
+    assert.equal(TRACE_CLIENT_VERSION, "0.3.0");
   });
 });
 
@@ -501,8 +568,8 @@ describe("environment opt-outs", () => {
 
   it("sends nothing and reports \"environment\" when TRACE_USAGE_REPORTING or DO_NOT_TRACK opts out", async () => {
     const clients = [
-      new TraceClient(baseUrl, "MyGame", { key: "k", env: { TRACE_USAGE_REPORTING: "off" } }),
-      new TraceClient(baseUrl, "MyGame", { key: "k", env: { DO_NOT_TRACK: "1" } }),
+      new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: { TRACE_USAGE_REPORTING: "off" } }),
+      new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: { DO_NOT_TRACK: "1" } }),
     ];
     for (const client of clients) {
       assert.equal(client.enabled, false);
@@ -516,33 +583,33 @@ describe("environment opt-outs", () => {
 
   it("checks the environment before enabled and the key", () => {
     const off = { TRACE_USAGE_REPORTING: "off" };
-    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "k", enabled: false, env: off }).disabledReason, REASON_ENVIRONMENT);
-    assert.equal(new TraceClient(baseUrl, "MyGame", { env: off }).disabledReason, REASON_ENVIRONMENT);
-    assert.equal(new TraceClient(baseUrl, "MyGame", { enabled: false, env: {} }).disabledReason, REASON_CONFIG);
-    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "  ", env: {} }).disabledReason, REASON_NO_KEY);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", enabled: false, env: off }).disabledReason, REASON_ENVIRONMENT);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", env: off }).disabledReason, REASON_ENVIRONMENT);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", enabled: false, env: {} }).disabledReason, REASON_CONFIG);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "  ", env: {} }).disabledReason, REASON_NO_KEY);
     assert.equal(TraceClient.disabled().disabledReason, REASON_CONFIG);
   });
 
   it("reports null as the reason when on, and keeps the build reason after close()", async () => {
-    const on = new TraceClient(baseUrl, "MyGame", { key: "k", env: {} });
+    const on = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: {} });
     assert.equal(on.disabledReason, null);
     assert.equal(on.enabled, true);
     await on.close();
     assert.equal(on.enabled, false);
     assert.equal(on.disabledReason, null, "close() is not a reason the client was built off");
-    const off = new TraceClient(baseUrl, "MyGame", { key: "k", enabled: false });
+    const off = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", enabled: false });
     await off.close();
     assert.equal(off.disabledReason, REASON_CONFIG);
   });
 
   it("reads process.env by default", async () => {
     process.env.TRACE_USAGE_REPORTING = "off";
-    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "k" }).disabledReason, REASON_ENVIRONMENT);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" }).disabledReason, REASON_ENVIRONMENT);
     delete process.env.TRACE_USAGE_REPORTING;
     process.env.DO_NOT_TRACK = "true";
-    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "k" }).disabledReason, REASON_ENVIRONMENT);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" }).disabledReason, REASON_ENVIRONMENT);
     delete process.env.DO_NOT_TRACK;
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k" });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
     assert.equal(client.disabledReason, null);
     await client.report("startup");
     assert.equal(capture.requests.length, 1);
@@ -551,7 +618,7 @@ describe("environment opt-outs", () => {
 
   it("an explicit env replaces process.env rather than adding to it", () => {
     process.env.TRACE_USAGE_REPORTING = "off";
-    const client = new TraceClient(baseUrl, "MyGame", { key: "k", env: {} });
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: {} });
     assert.equal(client.disabledReason, null);
     assert.equal(environmentOptsOut(), true);
     assert.equal(environmentOptsOut({}), false);
@@ -568,16 +635,16 @@ describe("environment opt-outs", () => {
       // Built synchronously while swapped out, so nothing else runs meanwhile.
       swapIn(undefined);
       noProcess = environmentOptsOut();
-      built.push(new TraceClient(baseUrl, "MyGame", { key: "k" }));
+      built.push(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" }));
       swapIn({
         get env(): never {
           throw new Error("env access denied");
         },
       });
       throwingEnv = environmentOptsOut();
-      built.push(new TraceClient(baseUrl, "MyGame", { key: "k" }));
+      built.push(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" }));
       swapIn({});
-      built.push(new TraceClient(baseUrl, "MyGame", { key: "k" }));
+      built.push(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" }));
     } finally {
       Object.defineProperty(globalThis, "process", descriptor);
     }
@@ -598,7 +665,7 @@ describe("environment opt-outs", () => {
       },
     });
     assert.equal(environmentOptsOut(hostile), false);
-    assert.equal(new TraceClient(baseUrl, "MyGame", { key: "k", env: hostile }).disabledReason, null);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: hostile }).disabledReason, null);
   });
 });
 
