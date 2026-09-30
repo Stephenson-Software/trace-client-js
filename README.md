@@ -61,6 +61,35 @@ one). A program that runs on other people's machines should expose that switch
 in its settings — and say so once, so whoever runs it knows it is on and where
 to turn it off.
 
+## Options and limits
+
+Besides `version`, `key`, `enabled` and `env`, the constructor's options take:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `timeoutMs` | `5000` | How long one request may take before it is aborted. Anything but a positive finite number — `0`, negative, `NaN`, `Infinity`, not a number — falls back to the default. |
+| `fetch` | the global `fetch` | The `fetch` to send with, for a runtime that provides its own or for tests. |
+| `debug` | none | Called with one line per dropped report, prefixed `[trace] `. A `debug` that throws is ignored. |
+
+`flush(timeoutMs)` and `close(timeoutMs)` take their own bound, defaulting to
+the client's timeout; a negative or non-finite one counts as `0`, so they
+return without waiting on requests in flight.
+
+`debug` hears about every report an enabled client drops: the in-flight cap
+was reached, the tags could not be serialized, the request failed or was
+aborted after the timeout, or the server answered with a non-`2xx` status.
+The last two lines include the JSON body that was sent. A report that was
+never going to be sent is not logged: a disabled or closed client, or a
+blank or non-string `name`.
+
+Tag values are cleaned before sending: `null` and `undefined` values are
+left out, and anything else is converted with `String()`. A value whose
+conversion throws drops the whole report, with a `debug` line.
+
+The limits are also available as `TraceClient.TIMEOUT_MS` (5000),
+`TraceClient.IN_FLIGHT_CAPACITY` (256) and `TraceClient.MAX_VERSION_LENGTH`
+(255).
+
 ## Turning it off from the environment
 
 Two environment variables switch off **every** program that uses a trace
