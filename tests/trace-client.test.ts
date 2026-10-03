@@ -262,6 +262,35 @@ describe("TraceClient", () => {
     assert.deepEqual(capture.requests, []);
   });
 
+  it("logs nothing for a report that was never going to be sent", async () => {
+    // Only drops of a report an enabled client meant to send reach debug.
+    const off = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", enabled: false, debug });
+    await off.report("startup");
+    const keyless = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", debug });
+    await keyless.report("startup");
+    const on = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
+    for (const name of ["", "   ", 42, undefined, null]) {
+      await on.report(name as unknown as string);
+    }
+    await on.close();
+    await on.report("after-close");
+    await sleep(100);
+    assert.deepEqual(capture.requests, []);
+    assert.deepEqual(log, [], "a disabled or closed client, or a blank or non-string name, is not a drop");
+  });
+
+  it("omits a value that is not a number", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
+    for (const value of ["5", null, true]) {
+      await client.report("loose", { value: value as unknown as number });
+    }
+    assert.equal(capture.requests.length, 3);
+    for (const request of capture.requests) {
+      assert.deepEqual(JSON.parse(request.body), { application: "MyGame", name: "loose", tags: { version: "1.2.3" } });
+    }
+    await client.close();
+  });
+
   it("rejects a missing baseUrl or application at construction", () => {
     assert.throws(() => new TraceClient("", "MyGame", { version: "1.2.3" }));
     assert.throws(() => new TraceClient("  ", "MyGame", { version: "1.2.3" }));
