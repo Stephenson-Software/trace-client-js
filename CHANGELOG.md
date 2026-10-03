@@ -4,6 +4,27 @@ All notable changes to this project are recorded here. The version in the
 header comment of `trace-client.ts` is the one consumers vendor; check it
 against this file to see what a re-vendor would bring.
 
+## 0.4.0 — 2026-10-03
+
+A random per-installation ID, matching trace-client-java 0.5.0, so the
+trace server can count installations rather than events. API-compatible
+with 0.3.0: nothing changes unless one of the new options is passed.
+
+- New options `installId` (an ID the program stores itself; trimmed, blank
+  means none, over 255 characters throws) and `installIdFile` (a path the
+  program chooses; read or created with a random UUID by
+  `TraceClient.installIdFromFile(path)`). `installId` wins.
+- Every event then carries the tag `install`. An event's own `install` tag
+  wins, and it is not added to an event that already has 32 tags
+  (`TraceClient.MAX_TAGS`).
+- Resolved only after the opt-outs: a disabled client never generates,
+  reads or writes an ID. `trace.installId` is the ID in use, or `null`.
+- `TraceClient.installIdFromFile(path)` never throws: an unreadable or
+  unwritable file, or a runtime without `node:fs` (reached only through
+  `process.getBuiltinModule`, so edge runtimes still load the file), yields
+  an in-memory ID for that run. No default location exists.
+- The exported values are unchanged; the new API hangs off `TraceClient`.
+
 ## 0.3.0 — 2026-09-29
 
 Every event carries the program's version, matching trace-client-java 0.4.0.
