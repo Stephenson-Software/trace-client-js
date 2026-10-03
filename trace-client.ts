@@ -1,16 +1,19 @@
 /**
- * trace-client 0.3.0 -- https://github.com/Stephenson-Software/trace-client-js
+ * trace-client 0.4.0 -- https://github.com/Stephenson-Software/trace-client-js
  *
  * One call to report that a program was used. Copy this file into a project
  * as is; there is nothing else to add. Zero dependencies and no Node-only
- * APIs -- only `fetch`, `AbortController`, `setTimeout` and `URL`, plus
+ * imports -- only `fetch`, `AbortController`, `setTimeout` and `URL`, plus
  * `process.env` when the runtime has one -- so it runs in Node 18+, in the
- * Next.js Edge runtime, and in any other runtime that has those four.
+ * Next.js Edge runtime, and in any other runtime that has those four. The
+ * optional install-ID file (`installIdFile`, `TraceClient.installIdFromFile`)
+ * reaches `node:fs` only through `process.getBuiltinModule` (Node 22.3+) at
+ * call time; where that is missing, the ID is kept in memory instead.
  *
  * MIT licensed. Keep this header when vendoring so the file can be found again.
  */
 
-export const TRACE_CLIENT_VERSION = "0.3.0";
+export const TRACE_CLIENT_VERSION = "0.4.0";
 
 // Everything added since 0.1.0 hangs off TraceClient (static members) rather
 // than being a new top-level export, so the file's exported values stay
@@ -29,7 +32,23 @@ const DO_NOT_TRACK_VALUES = ["1", "true", "yes"];
 // Declared here rather than taken from @types/node so the file still
 // type-checks against ES2022 + DOM alone; at runtime `process` may simply not
 // exist (a browser-like edge runtime), which processEnvironment() allows for.
-declare const process: { env?: Record<string, string | undefined> } | undefined;
+declare const process:
+  | { env?: Record<string, string | undefined>; getBuiltinModule?: (id: string) => unknown }
+  | undefined;
+
+// The few node:fs / node:path calls installIdFromFile makes, typed here for
+// the same reason as `process` above.
+interface NodeFs {
+  readFileSync(path: string, encoding: "utf8"): string;
+  writeFileSync(path: string, data: string, options: { encoding: "utf8"; flag: string }): void;
+  mkdirSync(path: string, options: { recursive: true }): unknown;
+}
+interface NodePath {
+  dirname(path: string): string;
+}
+
+/** An installation ID read from a file: what Java accepts on a `server-id:` line. */
+const INSTALL_ID_LINE = /^[A-Za-z0-9_.-]{1,255}$/;
 
 export interface TraceClientOptions {
   /**
@@ -55,6 +74,22 @@ export interface TraceClientOptions {
    * or a stand-in in tests.
    */
   env?: Environment;
+  /**
+   * The installation's ID, sent as the tag `install` on every event so the
+   * trace server can count installations rather than events. It should be
+   * random -- e.g. a `crypto.randomUUID()` the program stores itself -- and
+   * never derived from a person, account or address. Trimmed; missing or
+   * blank means none; longer than {@link TraceClient.MAX_VERSION_LENGTH}
+   * characters throws. Wins over `installIdFile`.
+   */
+  installId?: string | null;
+  /**
+   * A file, chosen by the program, that holds the installation's ID: read
+   * with {@link TraceClient.installIdFromFile}, which creates it with a new
+   * random UUID when it is missing. Only touched by an enabled client, so an
+   * opt-out never creates the file. Ignored when `installId` is given.
+   */
+  installIdFile?: string | null;
 }
 
 export interface ReportOptions {
@@ -97,6 +132,12 @@ export interface ReportOptions {
  * tied to a release as well as a `startup` one. An event's own `version` tag
  * wins over it.
  *
+ * Every event also carries the installation's ID as the tag `install` when
+ * the program gives one -- `installId`, or `installIdFile` for a file holding
+ * a random UUID made on first run -- so the trace server can count
+ * installations rather than events. It is resolved only by an enabled
+ * client; an event's own `install` tag wins over it.
+ *
  * ```ts
  * const trace = new TraceClient("https://trace.example.org", "my-site", {
  *   version: "1.4.0",
@@ -114,6 +155,10 @@ export class TraceClient {
   static readonly TIMEOUT_MS = 5000;
   /** The longest program version accepted, after trimming. */
   static readonly MAX_VERSION_LENGTH = 255;
+  /** At most this many tags; the `install` tag is not added to an event that already has this many. */
+  static readonly MAX_TAGS = 32;
+  /** The tag every event carries the installation's ID as. */
+  static readonly INSTALL_TAG = "install";
 
   /**
    * Environment variables that turn reporting off for every program using a
@@ -161,6 +206,7 @@ export class TraceClient {
   private readonly debug: ((message: string) => void) | undefined;
   private readonly inFlight = new Set<Promise<void>>();
   private readonly reason: DisabledReason | null;
+  private readonly install: string | null;
   private active: boolean;
 
   constructor(baseUrl: string, application: string, options: TraceClientOptions) {
@@ -178,6 +224,11 @@ export class TraceClient {
       throw new Error(`version is longer than ${TraceClient.MAX_VERSION_LENGTH} characters`);
     }
     this.version = version.trim();
+    const explicitInstall = options.installId;
+    const installId = typeof explicitInstall === "string" && explicitInstall.trim() ? explicitInstall.trim() : null;
+    if (installId !== null && installId.length > TraceClient.MAX_VERSION_LENGTH) {
+      throw new Error(`installId is longer than ${TraceClient.MAX_VERSION_LENGTH} characters`);
+    }
     this.endpoint = baseUrl.trim().replace(/\/+$/, "") + "/api/metrics";
     this.application = application.trim();
     this.key = (options.key ?? "").trim();
@@ -199,6 +250,59 @@ export class TraceClient {
       this.reason = null;
     }
     this.active = this.reason === null;
+    // After the opt-outs, never before: a disabled client neither makes up an
+    // ID nor writes one to disk.
+    if (!this.active) {
+      this.install = null;
+    } else if (installId !== null) {
+      this.install = installId;
+    } else if (typeof options.installIdFile === "string" && options.installIdFile.trim()) {
+      this.install = TraceClient.installIdFromFile(options.installIdFile);
+    } else {
+      this.install = null;
+    }
+  }
+
+  /**
+   * Loads the installation's ID from `path`, or creates it there. The first
+   * line made of letters, digits, `_`, `.` and `-` (at most 255 characters,
+   * surrounding space ignored) is the ID. When the file is missing or holds
+   * no such line, a new random UUID is written to it (parent directories
+   * created) and returned. Never throws: when the file cannot be read for any
+   * reason but not existing, cannot be written, or the runtime has no
+   * `node:fs`, a fresh UUID is returned for this process only, and nothing is
+   * written.
+   *
+   * This writes whatever the opt-outs say. Pass the path as the client's
+   * `installIdFile` option instead to have it read only by an enabled client.
+   */
+  static installIdFromFile(path: string): string {
+    const fresh = randomId();
+    if (typeof path !== "string" || !path.trim()) return fresh;
+    const fs = builtin<NodeFs>("node:fs");
+    const paths = builtin<NodePath>("node:path");
+    if (!fs || !paths) return fresh;
+    try {
+      let text: string | null = null;
+      try {
+        text = fs.readFileSync(path, "utf8");
+      } catch (failure) {
+        // Only a missing file is created; one that is there but unreadable
+        // (a directory, no permission) is left alone.
+        if ((failure as { code?: unknown } | null)?.code !== "ENOENT") return fresh;
+      }
+      if (text !== null) {
+        for (const line of text.split(/\r?\n/)) {
+          const candidate = line.trim();
+          if (INSTALL_ID_LINE.test(candidate)) return candidate;
+        }
+      }
+      fs.mkdirSync(paths.dirname(path), { recursive: true });
+      fs.writeFileSync(path, fresh + "\n", { encoding: "utf8", flag: "w" });
+      return fresh;
+    } catch {
+      return fresh;
+    }
   }
 
   /** A client that reports nothing. Useful as a default before settings are read. */
@@ -225,6 +329,15 @@ export class TraceClient {
   }
 
   /**
+   * The installation's ID every event carries as the tag `install`, or
+   * `null` when the client is disabled or has none (neither `installId` nor
+   * `installIdFile` given). Fixed at construction.
+   */
+  get installId(): string | null {
+    return this.install;
+  }
+
+  /**
    * Report that `name` happened, with an optional numeric value and optional
    * string tags. The returned promise is the delivery attempt itself: it is
    * already running, it settles when the server has answered or the attempt
@@ -240,7 +353,7 @@ export class TraceClient {
     }
     let body: string;
     try {
-      body = serialize(this.application, name, options.value, withVersion(options.tags, this.version));
+      body = serialize(this.application, name, options.value, withInstall(withVersion(options.tags, this.version), this.install));
     } catch (failure) {
       this.log(`could not serialize ${name}: ${describe(failure)}`);
       return Promise.resolve();
@@ -401,6 +514,43 @@ function withVersion(tags: Record<string, string> | undefined, version: string):
     merged.version = version;
   }
   return merged;
+}
+
+/**
+ * The tags plus `install`, unless they already carry one, there is no ID, or
+ * adding it would pass {@link TraceClient.MAX_TAGS}.
+ */
+function withInstall(tags: Record<string, string>, installId: string | null): Record<string, string> {
+  if (
+    installId === null ||
+    Object.prototype.hasOwnProperty.call(tags, TraceClient.INSTALL_TAG) ||
+    Object.keys(tags).length >= TraceClient.MAX_TAGS
+  ) {
+    return tags;
+  }
+  return { ...tags, [TraceClient.INSTALL_TAG]: installId };
+}
+
+/** A random UUID; never throws, even where `crypto.randomUUID` is missing. */
+function randomId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    // fall through
+  }
+  const hex = (n: number) =>
+    Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-${"89ab"[Math.floor(Math.random() * 4)]}${hex(3)}-${hex(12)}`;
+}
+
+/** A Node built-in module via `process.getBuiltinModule`, or null where the runtime has none. */
+function builtin<T>(id: string): T | null {
+  try {
+    if (typeof process === "undefined" || !process || typeof process.getBuiltinModule !== "function") return null;
+    return (process.getBuiltinModule(id) as T | undefined) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function serialize(

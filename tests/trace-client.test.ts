@@ -4,6 +4,9 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import * as clientModule from "../trace-client.ts";
 import { TraceClient, TRACE_CLIENT_VERSION, isBot, pagePath } from "../trace-client.ts";
@@ -517,6 +520,159 @@ describe("TraceClient", () => {
   });
 });
 
+describe("installation ID", () => {
+  let capture: Capture;
+  let server: Server;
+  let baseUrl: string;
+  let dir: string;
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  beforeEach(async () => {
+    capture = new Capture();
+    server = await serve(capture);
+    baseUrl = baseUrlOf(server);
+    dir = mkdtempSync(join(tmpdir(), "trace-install-"));
+  });
+
+  afterEach(async () => {
+    capture.release();
+    await stop(server);
+    rmSync(dir, { recursive: true, force: true });
+    for (const name of OPT_OUT_VARIABLES) delete process.env[name];
+  });
+
+  const tagsOf = (index: number) => JSON.parse(capture.requests[index].body).tags;
+
+  it("persists a random ID once, creating parent directories, and reuses it", async () => {
+    const file = join(dir, "nested", "deeper", "install-id");
+    const first = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installIdFile: file });
+    assert.match(first.installId ?? "", UUID);
+    assert.equal(readFileSync(file, "utf8"), first.installId + "\n");
+    const second = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installIdFile: file });
+    assert.equal(second.installId, first.installId);
+    assert.equal(TraceClient.installIdFromFile(file), first.installId);
+    await first.report("startup");
+    assert.deepEqual(tagsOf(0), { version: "1.0", install: first.installId });
+    await first.close();
+    await second.close();
+  });
+
+  it("reads the first valid line, and replaces a file that has none", () => {
+    const file = join(dir, "id");
+    writeFileSync(file, "\n  not valid!  \n  my-server_1.0  \nsecond\n");
+    assert.equal(TraceClient.installIdFromFile(file), "my-server_1.0");
+    writeFileSync(file, "nothing usable here\n" + "x".repeat(256) + "\n");
+    const made = TraceClient.installIdFromFile(file);
+    assert.match(made, UUID);
+    assert.equal(readFileSync(file, "utf8"), made + "\n");
+  });
+
+  it("falls back to an in-memory ID when the file cannot be read or written, without throwing", () => {
+    // A directory cannot be read as a file: left alone, not overwritten.
+    const asDirectory = TraceClient.installIdFromFile(dir);
+    assert.match(asDirectory, UUID);
+    // A parent that is a regular file cannot hold a directory: write fails.
+    const blocker = join(dir, "blocker");
+    writeFileSync(blocker, "a file\n");
+    const underFile = join(blocker, "sub", "id");
+    const id = TraceClient.installIdFromFile(underFile);
+    assert.match(id, UUID);
+    assert.equal(readFileSync(blocker, "utf8"), "a file\n");
+    assert.notEqual(TraceClient.installIdFromFile(underFile), id, "nothing persisted, so a new one each call");
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installIdFile: underFile });
+    assert.match(client.installId ?? "", UUID);
+    for (const bad of ["", "   ", null, undefined, 42]) {
+      assert.match(TraceClient.installIdFromFile(bad as unknown as string), UUID);
+    }
+  });
+
+  it("never creates the file or makes up an ID when disabled", () => {
+    const file = join(dir, "sub", "install-id");
+    const disabled = [
+      new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", enabled: false, installIdFile: file }),
+      new TraceClient(baseUrl, "MyGame", { version: "1.0", installIdFile: file }),
+      new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", env: { TRACE_USAGE_REPORTING: "off" }, installIdFile: file }),
+      new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", env: { DO_NOT_TRACK: "1" }, installIdFile: file, installId: "explicit" }),
+    ];
+    process.env.DO_NOT_TRACK = "1";
+    disabled.push(new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installIdFile: file }));
+    for (const client of disabled) {
+      assert.equal(client.enabled, false);
+      assert.equal(client.installId, null);
+    }
+    assert.equal(existsSync(join(dir, "sub")), false, "a disabled client must write nothing");
+    assert.equal(TraceClient.disabled().installId, null);
+  });
+
+  it("sends no install tag when no ID is configured", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k" });
+    assert.equal(client.installId, null);
+    await client.report("startup");
+    assert.deepEqual(tagsOf(0), { version: "1.0" });
+    await client.close();
+  });
+
+  it("uses an explicit ID, trimmed, over the file; blank means none; overlong throws", async () => {
+    const file = join(dir, "install-id");
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: "  abc-123 ", installIdFile: file });
+    assert.equal(client.installId, "abc-123");
+    assert.equal(existsSync(file), false, "an explicit ID wins, so the file is not touched");
+    await client.report("startup");
+    assert.deepEqual(tagsOf(0), { version: "1.0", install: "abc-123" });
+    await client.close();
+    for (const blank of ["", "   ", null, undefined]) {
+      assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: blank }).installId, null);
+    }
+    const blankWithFile = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: " ", installIdFile: file });
+    assert.match(blankWithFile.installId ?? "", UUID, "a blank explicit ID falls through to the file");
+    const longest = "i".repeat(TraceClient.MAX_VERSION_LENGTH);
+    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: ` ${longest} ` }).installId, longest);
+    assert.throws(
+      () => new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: longest + "i" }),
+      /installId is longer than 255/,
+    );
+  });
+
+  it("lets an event's own install tag win, without modifying the caller's tags", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: "mine" });
+    const tags = { install: "theirs" };
+    await client.report("startup", { tags });
+    await client.report("startup", { tags: { install: null as unknown as string } });
+    assert.deepEqual(tagsOf(0), { install: "theirs", version: "1.0" });
+    assert.deepEqual(tagsOf(1), { version: "1.0", install: "mine" }, "a null install tag is dropped, so the ID fills it");
+    assert.deepEqual(tags, { install: "theirs" });
+    await client.close();
+  });
+
+  it("never pushes an event past the tag cap", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: "mine" });
+    const full: Record<string, string> = {};
+    for (let i = 0; i < TraceClient.MAX_TAGS - 1; i++) full["t" + i] = String(i);
+    await client.report("full", { tags: full }); // 31 + version = 32: no room
+    const room: Record<string, string> = {};
+    for (let i = 0; i < TraceClient.MAX_TAGS - 2; i++) room["t" + i] = String(i);
+    await client.report("room", { tags: room }); // 30 + version = 31: install fits
+    assert.equal(TraceClient.MAX_TAGS, 32);
+    assert.equal(Object.keys(tagsOf(0)).length, 32);
+    assert.equal(tagsOf(0).install, undefined);
+    assert.equal(Object.keys(tagsOf(1)).length, 32);
+    assert.equal(tagsOf(1).install, "mine");
+    await client.close();
+  });
+
+  it("keeps the ID in memory where the runtime has no getBuiltinModule", () => {
+    const file = join(dir, "install-id");
+    const original = process.getBuiltinModule;
+    try {
+      (process as { getBuiltinModule?: unknown }).getBuiltinModule = undefined;
+      assert.match(TraceClient.installIdFromFile(file), UUID);
+    } finally {
+      process.getBuiltinModule = original;
+    }
+    assert.equal(existsSync(file), false);
+  });
+});
+
 describe("API shape", () => {
   it("exports exactly the values 0.1.0 did", () => {
     assert.deepEqual(Object.keys(clientModule).sort(), ["TRACE_CLIENT_VERSION", "TraceClient", "isBot", "pagePath"]);
@@ -529,7 +685,7 @@ describe("API shape", () => {
     assert.equal(await client.flush(50), undefined);
     assert.equal(await client.close(50), undefined);
     assert.equal(TraceClient.disabled().enabled, false);
-    assert.equal(TRACE_CLIENT_VERSION, "0.3.0");
+    assert.equal(TRACE_CLIENT_VERSION, "0.4.0");
   });
 });
 

@@ -46,6 +46,64 @@ constructor (the `version` from your `package.json`, or a constant the build
 fills in). The hand-added `version` tags can then be dropped if you
 like; left in, they still win, so nothing changes on the wire.
 
+## Every event carries a random installation ID
+
+Since 0.4.0, every event can also carry the tag `install`: a random ID for
+the installation, so the trace server can count **distinct installations**
+("active installs in the last 30 days") rather than raw events. It is the
+same idea as trace-client-java 0.5.0's server ID, and it is said out loud
+here because it is the one thing the client sends that is the same from one
+event to the next.
+
+**What it is.** A random UUID (`crypto.randomUUID()`), made on first run. It
+is not derived from anything — not a hostname, an IP address, a MAC address,
+a user, an account or a path. It identifies no person and no address; all it
+can say is "these events came from the same installation". (The trace server
+still sees the IP address of every HTTP request, as every web server does.)
+
+**Where it lives.** Wherever the program says, and nowhere else: there is
+no hidden default location, and without one of the two options below no ID
+is made up and no `install` tag is sent. A program that wants to be counted
+either names a file the client keeps the ID in —
+
+```ts
+const trace = new TraceClient(url, "my-game", {
+  version,
+  key,
+  installIdFile: join(configDir, "trace-install-id"), // created on first run
+});
+```
+
+— or passes an ID it stores itself:
+
+```ts
+new TraceClient(url, "my-game", { version, key, installId: settings.installId }); // null or blank: none sent
+```
+
+`installIdFile` uses `TraceClient.installIdFromFile(path)`: the first line
+made of letters, digits, `_`, `.` and `-` (at most 255 characters) is the ID;
+when the file is missing or has no such line, a new UUID is written to it
+(parent directories created). If the file cannot be read or written — or the
+runtime has no `node:fs`, as in an edge runtime; the file is reached through
+`process.getBuiltinModule` (Node 22.3+), never a top-level import — a fresh
+ID is used in memory for that run only. It never throws. An explicit
+`installId` wins over `installIdFile`; it is trimmed, and over 255
+characters throws, the same as `version`.
+
+`trace.installId` is the ID in use (`null` when disabled or when there is
+none), so a program can print it. An event that passes its own `install`
+tag keeps it, and the tag is not added to an event that already has 32 tags
+(`TraceClient.MAX_TAGS`).
+
+**Resetting it.** Delete the file (or its ID line); the next start writes a
+new one. Or put your own value in it.
+
+**Opting out.** Every opt-out — `TRACE_USAGE_REPORTING=off`,
+`DO_NOT_TRACK=1`, `enabled: false`, no key — also stops the ID: a disabled
+client never reads, generates or writes one, so `installIdFile` is never
+created. (`TraceClient.installIdFromFile(path)` called directly writes
+regardless; pass the path as `installIdFile` to keep that guarantee.)
+
 ## What `report` promises
 
 | Property | Meaning |
@@ -69,6 +127,8 @@ Besides `version`, `key`, `enabled` and `env`, the constructor's options take:
 |---|---|---|
 | `timeoutMs` | `5000` | How long one request may take before it is aborted. Anything but a positive finite number — `0`, negative, `NaN`, `Infinity`, not a number — falls back to the default. |
 | `fetch` | the global `fetch` | The `fetch` to send with, for a runtime that provides its own or for tests. |
+| `installId` | none | The installation's ID, sent as the tag `install`; see [above](#every-event-carries-a-random-installation-id). |
+| `installIdFile` | none | A file holding the installation's ID, created with a random UUID on first run by an enabled client. |
 | `debug` | none | Called with one line per dropped report, prefixed `[trace] `. A `debug` that throws is ignored. |
 
 `flush(timeoutMs)` and `close(timeoutMs)` take their own bound, defaulting to
@@ -208,7 +268,7 @@ site can flip `USAGE_REPORTING_ENABLED=false` and nothing is sent.
 ## The wire format
 
 `POST {baseUrl}/api/metrics` with `Content-Type: application/json`,
-`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.3.0 (<application>)`
+`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.4.0 (<application>)`
 and a body of
 
 ```json
@@ -216,7 +276,8 @@ and a body of
 ```
 
 `value` is omitted when not given (`NaN` and infinities count as not given);
-`tags` always holds at least `version`. The `User-Agent` carries the
+`tags` always holds at least `version`, plus `install` when the program
+gave an installation ID. The `User-Agent` carries the
 client's version, the `version` tag the program's. The server assigns the timestamp. Any `2xx` is success; anything
 else is passed to `debug` and dropped. A trailing slash on `baseUrl` is
 tolerated.
