@@ -268,7 +268,7 @@ site can flip `USAGE_REPORTING_ENABLED=false` and nothing is sent.
 ## The wire format
 
 `POST {baseUrl}/api/metrics` with `Content-Type: application/json`,
-`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.4.0 (<application>)`
+`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.4.1 (<application>)`
 and a body of
 
 ```json
