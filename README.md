@@ -185,7 +185,7 @@ this order — so a program can say so in its startup notice:
 
 ```ts
 console.log(trace.enabled
-  ? "Usage reporting is on. Details: https://github.com/Stephenson-Software/trace#usage-reporting"
+  ? "Usage reporting is on. Details: https://danielstephenson.dev/usage-reporting"
   : `Usage reporting is off (${trace.disabledReason}).`);
 ```
 
@@ -287,10 +287,8 @@ tolerated.
 A key identifies the program to the server and lets the operator revoke it;
 it is scoped to *reporting only*. Because it ships inside the program — in a
 public repository, in a browser-adjacent runtime — it cannot prove anything;
-treat trace data as best-effort telemetry, which is what it is. The reasoning
-is written up in the trace repository's
-[decision record on per-program write keys](https://github.com/Stephenson-Software/trace/blob/main/docs/decisions/0001-per-program-write-keys.md).
-Ask the trace operator for a key for your program.
+treat trace data as best-effort telemetry, which is what it is. Ask the
+trace operator for a key for your program.
 
 ## Building
 

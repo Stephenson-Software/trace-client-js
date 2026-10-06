@@ -4,6 +4,16 @@ All notable changes to this project are recorded here. The version in the
 header comment of `trace-client.ts` is the one consumers vendor; check it
 against this file to see what a re-vendor would bring.
 
+## [Unreleased]
+
+- The usage-reporting details link in the `TraceClient` doc comment and the
+  README's startup-notice example now points at
+  https://danielstephenson.dev/usage-reporting. The old link pointed into a
+  private repository, so anyone following it got a 404. Programs that copied
+  the README example should update the URL in their own notice.
+- The README's Keys section no longer links to a decision record in that
+  private repository.
+
 ## 0.4.0 — 2026-10-03
 
 A random per-installation ID, matching trace-client-java 0.5.0, so the
