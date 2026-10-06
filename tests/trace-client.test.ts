@@ -714,7 +714,7 @@ describe("API shape", () => {
     assert.equal(await client.flush(50), undefined);
     assert.equal(await client.close(50), undefined);
     assert.equal(TraceClient.disabled().enabled, false);
-    assert.equal(TRACE_CLIENT_VERSION, "0.4.0");
+    assert.equal(TRACE_CLIENT_VERSION, "0.4.1");
   });
 });
 

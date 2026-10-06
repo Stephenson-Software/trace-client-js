@@ -1,5 +1,5 @@
 /**
- * trace-client 0.4.0 -- https://github.com/Stephenson-Software/trace-client-js
+ * trace-client 0.4.1 -- https://github.com/Stephenson-Software/trace-client-js
  *
  * One call to report that a program was used. Copy this file into a project
  * as is; there is nothing else to add. Zero dependencies and no Node-only
@@ -13,7 +13,7 @@
  * MIT licensed. Keep this header when vendoring so the file can be found again.
  */
 
-export const TRACE_CLIENT_VERSION = "0.4.0";
+export const TRACE_CLIENT_VERSION = "0.4.1";
 
 // Everything added since 0.1.0 hangs off TraceClient (static members) rather
 // than being a new top-level export, so the file's exported values stay
