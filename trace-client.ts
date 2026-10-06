@@ -125,7 +125,7 @@ export interface ReportOptions {
  * `"config"` or `"no key"`; `null` when on) so the program can say so in its
  * notice. Programs that run on other people's machines should expose that
  * switch in their settings and say so once, pointing at
- * https://github.com/Stephenson-Software/trace#usage-reporting.
+ * https://danielstephenson.dev/usage-reporting.
  *
  * Every event carries the program's own version as the tag `version` -- the
  * required `version` option -- so a `page-view` or `command` event can be
