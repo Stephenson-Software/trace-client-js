@@ -308,6 +308,20 @@ describe("TraceClient", () => {
     assert.deepEqual(log, [], "a missing options object is not a serialize failure");
   });
 
+  it("does not throw when reading the options throws", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
+    const hostile = {
+      get value(): number {
+        throw new Error("boom");
+      },
+    };
+    await client.report("startup", hostile);
+    await client.close();
+    assert.deepEqual(capture.requests, []);
+    assert.equal(log.length, 1, "the drop goes to debug instead of escaping report()");
+    assert.match(log[0], /could not serialize startup/);
+  });
+
   it("rejects a missing baseUrl or application at construction", () => {
     assert.throws(() => new TraceClient("", "MyGame", { version: "1.2.3" }));
     assert.throws(() => new TraceClient("  ", "MyGame", { version: "1.2.3" }));
