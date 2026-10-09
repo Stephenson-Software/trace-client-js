@@ -13,6 +13,9 @@ against this file to see what a re-vendor would bring.
   the README example should update the URL in their own notice.
 - The README's Keys section no longer links to a decision record in that
   private repository.
+- `report(name, null)` from untyped code now sends the event as if no
+  options were given. It used to drop the event and log a misleading
+  "could not serialize" line to `debug`.
 
 ## 0.4.0 — 2026-10-03
 
