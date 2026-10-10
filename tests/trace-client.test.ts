@@ -10,6 +10,7 @@ import { join } from "node:path";
 
 import * as clientModule from "../trace-client.ts";
 import { TraceClient, TRACE_CLIENT_VERSION, isBot, pagePath } from "../trace-client.ts";
+import type { ReportOptions } from "../trace-client.ts";
 
 const { REASON_CONFIG, REASON_ENVIRONMENT, REASON_NO_KEY } = TraceClient;
 const environmentOptsOut = (env?: Record<string, string | undefined>) => TraceClient.environmentOptsOut(env);
@@ -292,6 +293,33 @@ describe("TraceClient", () => {
       assert.deepEqual(JSON.parse(request.body), { application: "MyGame", name: "loose", tags: { version: "1.2.3" } });
     }
     await client.close();
+  });
+
+  it("sends the event when untyped code passes null or a non-object as options", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
+    for (const options of [null, 42, "loose"]) {
+      await client.report("startup", options as unknown as ReportOptions);
+    }
+    assert.equal(capture.requests.length, 3, "no options was meant, so nothing is dropped");
+    for (const request of capture.requests) {
+      assert.deepEqual(JSON.parse(request.body), { application: "MyGame", name: "startup", tags: { version: "1.2.3" } });
+    }
+    await client.close();
+    assert.deepEqual(log, [], "a missing options object is not a serialize failure");
+  });
+
+  it("does not throw when reading the options throws", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
+    const hostile = {
+      get value(): number {
+        throw new Error("boom");
+      },
+    };
+    await client.report("startup", hostile);
+    await client.close();
+    assert.deepEqual(capture.requests, []);
+    assert.equal(log.length, 1, "the drop goes to debug instead of escaping report()");
+    assert.match(log[0], /could not serialize startup/);
   });
 
   it("rejects a missing baseUrl or application at construction", () => {

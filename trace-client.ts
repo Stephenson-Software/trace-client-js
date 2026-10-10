@@ -353,7 +353,9 @@ export class TraceClient {
     }
     let body: string;
     try {
-      body = serialize(this.application, name, options.value, withInstall(withVersion(options.tags, this.version), this.install));
+      // A null (or other non-object) options from untyped code means "no options".
+      const { value, tags } = options !== null && typeof options === "object" ? options : ({} as ReportOptions);
+      body = serialize(this.application, name, value, withInstall(withVersion(tags, this.version), this.install));
     } catch (failure) {
       this.log(`could not serialize ${name}: ${describe(failure)}`);
       return Promise.resolve();
