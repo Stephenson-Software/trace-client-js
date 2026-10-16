@@ -9,6 +9,10 @@ against this file to see what a re-vendor would bring.
 - `report(name, null)` from untyped code now sends the event as if no
   options were given. It used to drop the event and log a misleading
   "could not serialize" line to `debug`.
+- The `TraceClient.MAX_TAGS` doc comment no longer reads as a cap on an
+  event's tags: it only stops the `install` tag being added past 32. The
+  README now lists `MAX_TAGS` with the other limits and says the install ID
+  falls back to `Math.random()` where `crypto.randomUUID` is missing.
 
 ## 0.4.1 — 2026-10-05
 

@@ -155,7 +155,7 @@ export class TraceClient {
   static readonly TIMEOUT_MS = 5000;
   /** The longest program version accepted, after trimming. */
   static readonly MAX_VERSION_LENGTH = 255;
-  /** At most this many tags; the `install` tag is not added to an event that already has this many. */
+  /** The `install` tag is not added to an event that already has this many tags; its own tags are not capped. */
   static readonly MAX_TAGS = 32;
   /** The tag every event carries the installation's ID as. */
   static readonly INSTALL_TAG = "install";
