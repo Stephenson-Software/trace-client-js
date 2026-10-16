@@ -55,8 +55,9 @@ same idea as trace-client-java 0.5.0's server ID, and it is said out loud
 here because it is the one thing the client sends that is the same from one
 event to the next.
 
-**What it is.** A random UUID (`crypto.randomUUID()`), made on first run. It
-is not derived from anything — not a hostname, an IP address, a MAC address,
+**What it is.** A random UUID (`crypto.randomUUID()`), made on first run; in
+a runtime without `crypto.randomUUID`, a UUID-shaped ID built from
+`Math.random()` instead. It is not derived from anything — not a hostname, an IP address, a MAC address,
 a user, an account or a path. It identifies no person and no address; all it
 can say is "these events came from the same installation". (The trace server
 still sees the IP address of every HTTP request, as every web server does.)
@@ -147,8 +148,9 @@ left out, and anything else is converted with `String()`. A value whose
 conversion throws drops the whole report, with a `debug` line.
 
 The limits are also available as `TraceClient.TIMEOUT_MS` (5000),
-`TraceClient.IN_FLIGHT_CAPACITY` (256) and `TraceClient.MAX_VERSION_LENGTH`
-(255).
+`TraceClient.IN_FLIGHT_CAPACITY` (256), `TraceClient.MAX_VERSION_LENGTH`
+(255, which bounds `installId` too) and `TraceClient.MAX_TAGS` (32, past
+which the `install` tag is not added; an event's own tags are not capped).
 
 ## Turning it off from the environment
 
