@@ -153,6 +153,19 @@ describe("TraceClient", () => {
     await client.close();
   });
 
+  it("trims the base URL, application and key, and drops every trailing slash", async () => {
+    const client = new TraceClient(` ${baseUrl}/// `, "  MyGame ", { version: "1.2.3", key: " k-123  ", debug });
+    await client.report("startup");
+    assert.equal(capture.requests.length, 1, "surrounding space must not make the base URL unusable");
+    const request = capture.requests[0];
+    assert.equal(request.path, "/api/metrics", "runs of trailing slashes must not double up");
+    assert.equal(request.headers.authorization, "Bearer k-123", "the key is sent trimmed");
+    assert.equal(request.headers["user-agent"], `trace-client-js/${TRACE_CLIENT_VERSION} (MyGame)`);
+    assert.equal(JSON.parse(request.body).application, "MyGame", "the application is sent trimmed");
+    assert.deepEqual(log, []);
+    await client.close();
+  });
+
   it("omits value when undefined and carries value and tags when given, plus the program version", async () => {
     const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
     await client.report("world-load", { value: 2.5, tags: { seed: "42", size: 'the "big" one' } });
@@ -688,6 +701,27 @@ describe("installation ID", () => {
       () => new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: longest + "i" }),
       /installId is longer than 255/,
     );
+  });
+
+  it("treats a non-string installId as none, falling through to the file", () => {
+    const file = join(dir, "install-id");
+    for (const loose of [42, true, {}]) {
+      const options = { version: "1.0", key: "k", installId: loose as unknown as string };
+      assert.equal(new TraceClient(baseUrl, "MyGame", options).installId, null, `installId=${String(loose)}`);
+    }
+    const withFile = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: 42 as unknown as string, installIdFile: file });
+    assert.match(withFile.installId ?? "", UUID);
+    assert.equal(readFileSync(file, "utf8"), withFile.installId + "\n");
+    for (const blank of ["", "   ", null]) {
+      assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installIdFile: blank }).installId, null);
+    }
+  });
+
+  it("reads an ID from a file with Windows line endings", () => {
+    const file = join(dir, "id");
+    writeFileSync(file, "\r\n  my-server_1.0 \r\nsecond\r\n");
+    assert.equal(TraceClient.installIdFromFile(file), "my-server_1.0");
+    assert.equal(readFileSync(file, "utf8"), "\r\n  my-server_1.0 \r\nsecond\r\n", "a file with an ID is not rewritten");
   });
 
   it("lets an event's own install tag win, without modifying the caller's tags", async () => {
