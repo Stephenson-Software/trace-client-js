@@ -13,6 +13,9 @@ against this file to see what a re-vendor would bring.
   event's tags: it only stops the `install` tag being added past 32. The
   README now lists `MAX_TAGS` with the other limits and says the install ID
   falls back to `Math.random()` where `crypto.randomUUID` is missing.
+- `pagePath()` no longer returns a trailing slash when its 200-character
+  cut lands on one; the cut now happens before the trailing slash is
+  removed, so one long page reports under one `page` tag.
 
 ## 0.4.1 — 2026-10-05
 
