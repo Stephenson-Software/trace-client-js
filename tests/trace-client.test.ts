@@ -936,6 +936,11 @@ describe("pagePath", () => {
     assert.equal(pagePath(long), "/" + "x".repeat(199));
   });
 
+  it("leaves no trailing slash when the cut at 200 characters lands on one", () => {
+    const path = pagePath("/" + "a".repeat(198) + "/b");
+    assert.equal(path, "/" + "a".repeat(198), "a truncated path must not end in a slash");
+  });
+
   it("falls back to the root for a non-string or an unparseable absolute URL", () => {
     assert.equal(pagePath(42 as unknown as string), "/");
     assert.equal(pagePath(null as unknown as string), "/");

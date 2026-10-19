@@ -457,8 +457,9 @@ export function pagePath(urlOrPath: string): string {
   if (cut >= 0) path = path.slice(0, cut);
   if (!path.startsWith("/")) path = "/" + path;
   path = path.replace(/\/{2,}/g, "/");
-  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+  // Cut first, so a cut that lands on a slash cannot leave one at the end.
   if (path.length > 200) path = path.slice(0, 200);
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
   return path;
 }
 
