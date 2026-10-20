@@ -366,7 +366,8 @@ export class TraceClient {
         this.log(`could not deliver ${body}: ${describe(failure)}`);
       });
     } catch (failure) {
-      // send() is async, so this only happens if fetch itself is missing.
+      // Unreachable while send() is async -- a missing fetch rejects and is
+      // logged above -- but kept so report() still cannot throw if that changes.
       this.log(`could not deliver ${body}: ${describe(failure)}`);
       return Promise.resolve();
     }
