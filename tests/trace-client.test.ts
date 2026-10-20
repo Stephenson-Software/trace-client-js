@@ -480,6 +480,27 @@ describe("TraceClient", () => {
     await client.close();
   });
 
+  it("never throws or rejects in a runtime with no global fetch", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+    assert.ok(descriptor, "Node defines globalThis.fetch");
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
+    let work: Promise<void> = Promise.resolve();
+    try {
+      // report() looks fetch up before it returns, so it only has to be gone meanwhile.
+      Object.defineProperty(globalThis, "fetch", { value: undefined, configurable: true, writable: true });
+      work = client.report("startup");
+    } finally {
+      Object.defineProperty(globalThis, "fetch", descriptor);
+    }
+    await work; // must resolve
+    await client.close();
+    assert.deepEqual(capture.requests, []);
+    assert.ok(
+      log.some((line) => line.includes("could not deliver") && line.includes("TypeError")),
+      log.join("\n"),
+    );
+  });
+
   it("delivers a report followed by an immediate close()", async () => {
     // A CLI reports once and exits at once. close() must drain what is in flight.
     for (let i = 0; i < 30; i++) {
