@@ -271,6 +271,17 @@ describe("TraceClient", () => {
     assert.deepEqual(capture.requests, []);
   });
 
+  it("treats a non-string key from untyped code as missing rather than throwing", async () => {
+    for (const key of [42, true, {}]) {
+      const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: key as unknown as string });
+      assert.equal(client.enabled, false, `key=${String(key)} must not enable the client`);
+      assert.equal(client.disabledReason, REASON_NO_KEY);
+      await client.report("startup");
+      await client.close();
+    }
+    assert.deepEqual(capture.requests, []);
+  });
+
   it("ignores a blank name", async () => {
     const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
     await client.report("");
