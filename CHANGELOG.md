@@ -16,6 +16,10 @@ against this file to see what a re-vendor would bring.
 - `pagePath()` no longer returns a trailing slash when its 200-character
   cut lands on one; the cut now happens before the trailing slash is
   removed, so one long page reports under one `page` tag.
+- A `key` that is not a string (a number or boolean from untyped config)
+  now yields a disabled client with `disabledReason` `"no key"`, as a
+  missing key does. The constructor used to throw a `TypeError` that did
+  not name the argument.
 
 ## 0.4.1 — 2026-10-05
 

@@ -182,7 +182,7 @@ this order — so a program can say so in its startup notice:
 |---|---|
 | `"environment"` | `TRACE_USAGE_REPORTING` or `DO_NOT_TRACK` above |
 | `"config"` | `enabled: false` |
-| `"no key"` | the key was missing or blank |
+| `"no key"` | the key was missing, blank or not a string |
 | `null` | the client reports |
 
 ```ts
