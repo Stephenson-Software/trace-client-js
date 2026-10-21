@@ -57,7 +57,7 @@ export interface TraceClientOptions {
    * longer than {@link TraceClient.MAX_VERSION_LENGTH} characters throws.
    */
   version: string;
-  /** The program's write key. Blank or missing yields a client that does nothing. */
+  /** The program's write key. Blank, missing or not a string yields a client that does nothing. */
   key?: string;
   /** The opt-out switch. `false` yields a client that does nothing. Default `true`. */
   enabled?: boolean;
@@ -175,7 +175,7 @@ export class TraceClient {
   static readonly REASON_ENVIRONMENT = "environment";
   /** {@link disabledReason} when the program passed `enabled: false`. */
   static readonly REASON_CONFIG = "config";
-  /** {@link disabledReason} when the key was missing or blank. */
+  /** {@link disabledReason} when the key was missing, blank or not a string. */
   static readonly REASON_NO_KEY = "no key";
 
   /**
@@ -231,7 +231,8 @@ export class TraceClient {
     }
     this.endpoint = baseUrl.trim().replace(/\/+$/, "") + "/api/metrics";
     this.application = application.trim();
-    this.key = (options.key ?? "").trim();
+    // A non-string key from untyped code counts as missing rather than throwing.
+    this.key = typeof options.key === "string" ? options.key.trim() : "";
     const timeoutMs = options.timeoutMs;
     this.timeoutMs =
       typeof timeoutMs === "number" && timeoutMs > 0 && Number.isFinite(timeoutMs)
