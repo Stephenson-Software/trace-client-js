@@ -794,6 +794,32 @@ describe("installation ID", () => {
     }
     assert.equal(existsSync(file), false);
   });
+
+  it("makes a UUID-shaped ID without throwing where crypto.randomUUID is missing or throws", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    assert.ok(descriptor, "Node defines globalThis.crypto");
+    const standIns = [
+      undefined,
+      {},
+      {
+        randomUUID(): never {
+          throw new Error("no entropy here");
+        },
+      },
+    ];
+    try {
+      for (const standIn of standIns) {
+        Object.defineProperty(globalThis, "crypto", { value: standIn, configurable: true, writable: true });
+        const first = TraceClient.installIdFromFile("");
+        const second = TraceClient.installIdFromFile("");
+        assert.match(first, UUID, `crypto=${JSON.stringify(standIn)} must still yield a UUID-shaped ID`);
+        assert.match(second, UUID);
+        assert.notEqual(first, second, "each fallback ID is fresh");
+      }
+    } finally {
+      Object.defineProperty(globalThis, "crypto", descriptor);
+    }
+  });
 });
 
 describe("API shape", () => {
