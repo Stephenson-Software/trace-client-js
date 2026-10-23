@@ -20,6 +20,11 @@ against this file to see what a re-vendor would bring.
   now yields a disabled client with `disabledReason` `"no key"`, as a
   missing key does. The constructor used to throw a `TypeError` that did
   not name the argument.
+- The `ReportOptions.value` doc comment and the README's wire-format
+  section now say a `value` that is not a number is omitted, as `NaN` and
+  infinities are. The `isBot()` doc comment now says a blank (all-space)
+  User-Agent counts as a bot, as a missing or empty one does. Neither
+  behavior changed.
 
 ## 0.4.1 — 2026-10-05
 
