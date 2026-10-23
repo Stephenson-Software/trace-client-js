@@ -93,7 +93,7 @@ export interface TraceClientOptions {
 }
 
 export interface ReportOptions {
-  /** An optional number to attach to the event. NaN and infinities are omitted. */
+  /** An optional number to attach to the event. NaN, infinities and non-numbers are omitted. */
   value?: number;
   /** Optional string tags. */
   tags?: Record<string, string>;
@@ -470,7 +470,7 @@ const BOT_PATTERN =
 
 /**
  * Whether a User-Agent header belongs to a crawler, a monitor, or a script
- * rather than a person's browser. A missing or empty header counts as a bot:
+ * rather than a person's browser. A missing, empty or blank header counts as a bot:
  * every real browser sends one.
  */
 export function isBot(userAgent: string | null | undefined): boolean {

@@ -277,7 +277,8 @@ and a body of
 {"application":"my-site","name":"page-view","tags":{"page":"/blog/hello","version":"1.4.0"}}
 ```
 
-`value` is omitted when not given (`NaN` and infinities count as not given);
+`value` is omitted when not given (`NaN`, infinities and anything that is not
+a number count as not given);
 `tags` always holds at least `version`, plus `install` when the program
 gave an installation ID. The `User-Agent` carries the
 client's version, the `version` tag the program's. The server assigns the timestamp. Any `2xx` is success; anything
