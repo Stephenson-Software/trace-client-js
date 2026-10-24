@@ -1026,6 +1026,41 @@ describe("isBot", () => {
     "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.0; +https://openai.com/gptbot)",
     "Screaming Frog SEO Spider/19.0",
     "Some Generic Web Crawler 1.0",
+    // HTTP libraries and API tools
+    "okhttp/4.12.0",
+    "Java/17.0.10",
+    "Apache-HttpClient/4.5.14 (Java/17.0.8)",
+    "axios/1.6.8",
+    "node-fetch/1.0 (+https://github.com/bitinn/node-fetch)",
+    "undici",
+    "PostmanRuntime/7.37.3",
+    "insomnia/2023.5.8",
+    "HTTPie/3.2.2",
+    "Python-urllib/3.11",
+    "libwww-perl/6.72",
+    "Scrapy/2.11.1 (+https://scrapy.org)",
+    // AI crawlers
+    "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)",
+    "CCBot/2.0 (https://commoncrawl.org/faq/)",
+    "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ChatGPT-User/1.0; +https://openai.com/bot)",
+    "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
+    "Mozilla/5.0 (Linux; Android 5.0) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36 (compatible; Bytespider; spider-feedback@bytedance.com)",
+    // Link previewers
+    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+    "WhatsApp/2.23.20.0",
+    "TelegramBot (like TwitterBot)",
+    "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)",
+    "redditbot/1.0",
+    // Search engines and SEO crawlers
+    "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
+    "Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)",
+    "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15 (Applebot/0.1; +http://www.apple.com/go/applebot)",
+    "Mozilla/5.0 (compatible; MJ12bot/v1.4.8; http://mj12bot.com/)",
+    "Mozilla/5.0 (Linux; Android 7.0;) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36 (compatible; PetalBot;+https://webmaster.petalsearch.com/site/petalbot)",
+    // Uptime monitors
+    "Pingdom.com_bot_version_1.4_(http://www.pingdom.com/)",
+    "Mozilla/5.0 (compatible; StatusCake)",
   ];
   const humans = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -1034,6 +1069,11 @@ describe("isBot", () => {
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 14; SAMSUNG SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/24.0 Chrome/117.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 OPR/110.0.0.0",
+    "Mozilla/5.0 (Android 14; Mobile; rv:125.0) Gecko/125.0 Firefox/125.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/124.0.6367.111 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
   ];
 
   it("recognises crawlers, monitors and scripts", () => {
