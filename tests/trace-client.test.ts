@@ -255,6 +255,53 @@ describe("TraceClient", () => {
     await client.close();
   });
 
+  it("frees a slot when a request fails or the server rejects it", async () => {
+    // A server that is down or refusing the key for longer than the cap must
+    // not leave the client full for good: each failure gives its slot back.
+    let calls = 0;
+    const client = new TraceClient(baseUrl, "MyGame", {
+      version: "1.2.3",
+      key: "k",
+      debug,
+      fetch: (async () => {
+        calls++;
+        if (calls % 2 === 0) throw new Error("connection refused");
+        return new Response(null, { status: 500 });
+      }) as typeof fetch,
+    });
+    const total = TraceClient.IN_FLIGHT_CAPACITY + 10;
+    for (let i = 0; i < total; i++) await client.report("one-at-a-time");
+    assert.equal(calls, total, "every report must reach fetch; a leaked slot would start dropping them");
+    assert.ok(!log.some((line) => line.includes("in-flight cap reached")), log.join("\n"));
+    assert.equal(log.filter((line) => line.includes("could not deliver")).length, total / 2);
+    assert.equal(log.filter((line) => line.includes("answered 500")).length, total / 2);
+    await client.close();
+  });
+
+  it("frees every slot once requests are given up after the timeout", async () => {
+    capture.hang = true;
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", timeoutMs: 500, debug });
+    const work: Promise<void>[] = [];
+    for (let i = 0; i < TraceClient.IN_FLIGHT_CAPACITY; i++) work.push(client.report("hung"));
+    await Promise.all(work); // each one is aborted after the timeout
+    assert.equal(
+      log.filter((line) => line.includes("could not deliver")).length,
+      TraceClient.IN_FLIGHT_CAPACITY,
+      "every hung request is given up and logged",
+    );
+    capture.hang = false;
+    await client.report("after");
+    assert.ok(
+      !log.some((line) => line.includes("in-flight cap reached")),
+      "a full set of timed-out requests must not keep the client full",
+    );
+    assert.ok(
+      capture.requests.some((request) => JSON.parse(request.body).name === "after"),
+      "the report after the timeouts must be sent",
+    );
+    await client.close();
+  });
+
   it("sends nothing when disabled or without a key", async () => {
     const clients = [
       new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", enabled: false }),
