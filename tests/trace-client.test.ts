@@ -593,6 +593,31 @@ describe("TraceClient", () => {
     await client.close();
   });
 
+  it("flush() and close() with no argument wait at most the client's own timeout, even when fetch ignores the abort", async () => {
+    // A fetch that never settles, abort or not: only the drain's own bound can end the wait.
+    const client = new TraceClient(baseUrl, "MyGame", {
+      version: "1.2.3",
+      key: "k",
+      timeoutMs: 300,
+      fetch: (() => new Promise<Response>(() => {})) as typeof fetch,
+    });
+    client.report("startup");
+    for (const [label, drain] of [
+      ["flush()", () => client.flush()],
+      ["close()", () => client.close()],
+    ] as const) {
+      const before = Date.now();
+      await drain();
+      const elapsed = Date.now() - before;
+      assert.ok(elapsed >= 250, `${label} took ${elapsed}ms; it must wait for in-flight work up to the timeout`);
+      assert.ok(
+        elapsed < 2000,
+        `${label} took ${elapsed}ms; it must default to timeoutMs (300), not ${TraceClient.TIMEOUT_MS} or forever`,
+      );
+    }
+    assert.equal(client.enabled, false);
+  });
+
   it("rejects a missing, blank or overlong version at construction", () => {
     const withOptions = (options: unknown) => () => new TraceClient(baseUrl, "MyGame", options as { version: string });
     assert.throws(withOptions(undefined), /version is required/);
