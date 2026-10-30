@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 import * as clientModule from "../trace-client.ts";
 import { TraceClient, TRACE_CLIENT_VERSION, isBot, pagePath } from "../trace-client.ts";
-import type { ReportOptions } from "../trace-client.ts";
+import type { ReportOptions, TraceClientOptions } from "../trace-client.ts";
 
 const { REASON_CONFIG, REASON_ENVIRONMENT, REASON_NO_KEY } = TraceClient;
 const environmentOptsOut = (env?: Record<string, string | undefined>) => TraceClient.environmentOptsOut(env);
@@ -504,6 +504,59 @@ describe("TraceClient", () => {
     }
     assert.ok(log.some((line) => line.includes("Error: fetch failed (connect ECONNREFUSED)")), log.join("\n"));
     assert.ok(log.some((line) => line.includes("plain string failure")), log.join("\n"));
+  });
+
+  it("gives each dropped report one debug line, prefixed [trace], naming the report or the body sent", async () => {
+    const sent = (name: string) => JSON.stringify({ application: "MyGame", name, tags: { version: "1.2.3" } });
+    const linesFrom = async (options: Partial<TraceClientOptions>, run: (client: TraceClient) => Promise<unknown>) => {
+      const lines: string[] = [];
+      const client = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
+        key: "k",
+        debug: (message) => lines.push(message),
+        ...options,
+      });
+      await run(client);
+      await client.close();
+      return lines;
+    };
+
+    capture.replyStatus = 500;
+    assert.deepEqual(await linesFrom({}, (client) => client.report("rejected")), [
+      `[trace] trace server answered 500 for ${sent("rejected")}`,
+    ]);
+
+    const refused = (async () => {
+      throw new Error("connection refused");
+    }) as typeof fetch;
+    assert.deepEqual(await linesFrom({ fetch: refused }, (client) => client.report("failed")), [
+      `[trace] could not deliver ${sent("failed")}: Error: connection refused`,
+    ]);
+
+    const hostile = {
+      toString(): never {
+        throw new Error("no string for you");
+      },
+    };
+    assert.deepEqual(
+      await linesFrom({}, (client) => client.report("broken", { tags: { bad: hostile as unknown as string } })),
+      ["[trace] could not serialize broken: Error: no string for you"],
+    );
+
+    // A fetch that holds every slot until its abort, so the next report meets a full client.
+    const holding = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      })) as typeof fetch;
+    const full = await linesFrom({ fetch: holding, timeoutMs: 300 }, async (client) => {
+      const work: Promise<void>[] = [];
+      for (let i = 0; i < TraceClient.IN_FLIGHT_CAPACITY; i++) work.push(client.report("held"));
+      work.push(client.report("overflow"));
+      await Promise.all(work);
+    });
+    assert.equal(full.length, TraceClient.IN_FLIGHT_CAPACITY + 1, "one line per drop, no more");
+    assert.equal(full[0], "[trace] in-flight cap reached, dropped overflow");
+    for (const line of full.slice(1)) assert.equal(line, `[trace] could not deliver ${sent("held")}: Error: aborted`);
   });
 
   it("flush() and close() treat a negative or non-finite timeout as zero", async () => {
