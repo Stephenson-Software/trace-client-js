@@ -961,6 +961,19 @@ describe("API shape", () => {
     assert.equal(TraceClient.disabled().enabled, false);
     assert.equal(TRACE_CLIENT_VERSION, "0.4.1");
   });
+
+  it("keeps the documented values of its public constants, which the Python and Java clients share", () => {
+    assert.equal(TraceClient.IN_FLIGHT_CAPACITY, 256);
+    assert.equal(TraceClient.TIMEOUT_MS, 5000);
+    assert.equal(TraceClient.MAX_VERSION_LENGTH, 255);
+    assert.equal(TraceClient.MAX_TAGS, 32);
+    assert.equal(TraceClient.INSTALL_TAG, "install");
+    assert.equal(TraceClient.ENV_TRACE_USAGE_REPORTING, "TRACE_USAGE_REPORTING");
+    assert.equal(TraceClient.ENV_DO_NOT_TRACK, "DO_NOT_TRACK");
+    assert.equal(REASON_ENVIRONMENT, "environment");
+    assert.equal(REASON_CONFIG, "config");
+    assert.equal(REASON_NO_KEY, "no key");
+  });
 });
 
 describe("environment opt-outs", () => {
