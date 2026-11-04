@@ -126,7 +126,7 @@ Besides `version`, `key`, `enabled` and `env`, the constructor's options take:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `timeoutMs` | `5000` | How long one request may take before it is aborted. Anything but a positive finite number — `0`, negative, `NaN`, `Infinity`, not a number — falls back to the default. |
+| `timeoutMs` | `5000` | How long one request may take before it is aborted. Anything but a positive finite number — `0`, negative, `NaN`, `Infinity`, not a number — falls back to the default. A longer one than `2147483647` (about 24.8 days, the most a timer can hold) is held to that. |
 | `fetch` | the global `fetch` | The `fetch` to send with, for a runtime that provides its own or for tests. |
 | `installId` | none | The installation's ID, sent as the tag `install`; see [above](#every-event-carries-a-random-installation-id). |
 | `installIdFile` | none | A file holding the installation's ID, created with a random UUID on first run by an enabled client. |
@@ -134,7 +134,8 @@ Besides `version`, `key`, `enabled` and `env`, the constructor's options take:
 
 `flush(timeoutMs)` and `close(timeoutMs)` take their own bound, defaulting to
 the client's timeout; a negative or non-finite one counts as `0`, so they
-return without waiting on requests in flight.
+return without waiting on requests in flight, and one over `2147483647` is
+held to that.
 
 `debug` hears about every report an enabled client drops: the in-flight cap
 was reached, the tags could not be serialized, the request failed or was

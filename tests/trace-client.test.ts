@@ -429,6 +429,49 @@ describe("TraceClient", () => {
     assert.deepEqual(log, []);
   });
 
+  it("does not abort at once when timeoutMs is too long for a timer to hold", async () => {
+    // setTimeout holds a signed 32-bit delay; past that, unheld, it fires after 1 ms.
+    for (const timeoutMs of [2 ** 31, 1e12, Number.MAX_VALUE]) {
+      let aborted: boolean | undefined;
+      const client = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
+        key: "k",
+        timeoutMs,
+        debug,
+        fetch: (async (_url: unknown, init?: RequestInit) => {
+          await sleep(100);
+          aborted = init?.signal?.aborted;
+          return new Response(null, { status: 201 });
+        }) as typeof fetch,
+      });
+      await client.report("startup");
+      assert.equal(aborted, false, `timeoutMs=${timeoutMs} must not abort the request`);
+      await client.close();
+    }
+    assert.deepEqual(log, []);
+  });
+
+  it("flush() and close() still wait when their timeout is too long for a timer to hold", async () => {
+    for (const drain of ["flush", "close"] as const) {
+      for (const timeoutMs of [2 ** 31, 1e12, Number.MAX_VALUE]) {
+        let delivered = false;
+        const client = new TraceClient(baseUrl, "MyGame", {
+          version: "1.2.3",
+          key: "k",
+          fetch: (async () => {
+            await sleep(100);
+            delivered = true;
+            return new Response(null, { status: 201 });
+          }) as typeof fetch,
+        });
+        client.report("startup");
+        await client[drain](timeoutMs);
+        assert.equal(delivered, true, `${drain}(${timeoutMs}) must wait for the report in flight`);
+        await client.close();
+      }
+    }
+  });
+
   it("drops null and undefined tags, coerces other values to strings, and leaves only the program version when none remain", async () => {
     const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k" });
     const loose = (tags: Record<string, unknown>) => tags as Record<string, string>;

@@ -50,6 +50,9 @@ interface NodePath {
 /** An installation ID read from a file: what Java accepts on a `server-id:` line. */
 const INSTALL_ID_LINE = /^[A-Za-z0-9_.-]{1,255}$/;
 
+/** The longest delay `setTimeout` holds; past it, the timer fires almost at once. */
+const MAX_TIMER_MS = 2147483647;
+
 export interface TraceClientOptions {
   /**
    * The program's own version, required. Sent as the tag `version` on every
@@ -61,7 +64,10 @@ export interface TraceClientOptions {
   key?: string;
   /** The opt-out switch. `false` yields a client that does nothing. Default `true`. */
   enabled?: boolean;
-  /** Per-request timeout in milliseconds. Default {@link TraceClient.TIMEOUT_MS}. */
+  /**
+   * Per-request timeout in milliseconds. Default {@link TraceClient.TIMEOUT_MS}.
+   * Held to 2147483647 (about 24.8 days), the longest a timer can wait.
+   */
   timeoutMs?: number;
   /** The `fetch` to use. Default: the global one. */
   fetch?: typeof fetch;
@@ -236,7 +242,7 @@ export class TraceClient {
     const timeoutMs = options.timeoutMs;
     this.timeoutMs =
       typeof timeoutMs === "number" && timeoutMs > 0 && Number.isFinite(timeoutMs)
-        ? timeoutMs
+        ? Math.min(timeoutMs, MAX_TIMER_MS)
         : TraceClient.TIMEOUT_MS;
     this.fetchImpl = options.fetch;
     this.debug = options.debug;
@@ -585,7 +591,10 @@ function serialize(
 }
 
 function bounded(work: Promise<void>, timeoutMs: number): Promise<void> {
-  const ms = typeof timeoutMs === "number" && timeoutMs >= 0 && Number.isFinite(timeoutMs) ? timeoutMs : 0;
+  const ms =
+    typeof timeoutMs === "number" && timeoutMs >= 0 && Number.isFinite(timeoutMs)
+      ? Math.min(timeoutMs, MAX_TIMER_MS)
+      : 0;
   return new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ms);
     work.then(
