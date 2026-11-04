@@ -6,6 +6,10 @@ against this file to see what a re-vendor would bring.
 
 ## [Unreleased]
 
+- A `timeoutMs`, or a `flush()` / `close()` bound, over 2147483647 (about
+  24.8 days) is now held to that value. It used to overflow `setTimeout`,
+  which fired almost at once: every request was aborted, a drain returned
+  without waiting, and Node printed a `TimeoutOverflowWarning` on stderr.
 - `report(name, null)` from untyped code now sends the event as if no
   options were given. It used to drop the event and log a misleading
   "could not serialize" line to `debug`.
