@@ -6,6 +6,14 @@ against this file to see what a re-vendor would bring.
 
 ## [Unreleased]
 
+- `report()` no longer throws or rejects when the failure it is logging
+  cannot be turned into a string, such as an `Object.create(null)` thrown by
+  a tag's `toString` or by a custom `fetch`. The rejecting case also kept
+  its in-flight slot for good. The debug line now reads
+  `unprintable failure`.
+- An `async` `debug` callback that rejects is now ignored, as a throwing one
+  is. It used to become an unhandled rejection, which ends a Node process by
+  default. Its promise is not waited for.
 - A `timeoutMs`, or a `flush()` / `close()` bound, over 2147483647 (about
   24.8 days) is now held to that value. It used to overflow `setTimeout`,
   which fired almost at once: every request was aborted, a drain returned
