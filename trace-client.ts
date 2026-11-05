@@ -71,7 +71,7 @@ export interface TraceClientOptions {
   timeoutMs?: number;
   /** The `fetch` to use. Default: the global one. */
   fetch?: typeof fetch;
-  /** Receives one line per dropped report. Default: silence. */
+  /** Receives one line per dropped report. Default: silence. A throw or rejection from it is ignored. */
   debug?: (message: string) => void;
   /**
    * Where to read `TRACE_USAGE_REPORTING` and `DO_NOT_TRACK` from. Default:
@@ -440,7 +440,9 @@ export class TraceClient {
   private log(message: string): void {
     if (!this.debug) return;
     try {
-      this.debug("[trace] " + message);
+      const result: unknown = this.debug("[trace] " + message);
+      // An async sink fails by rejecting, which the catch below never sees.
+      Promise.resolve(result).catch(() => undefined);
     } catch {
       // a debug sink must never be the reason a program stops either
     }
@@ -610,11 +612,16 @@ function bounded(work: Promise<void>, timeoutMs: number): Promise<void> {
   });
 }
 
+/** A failure as text. Called while handling a drop, so it must never throw itself. */
 function describe(failure: unknown): string {
-  if (failure instanceof Error) {
-    const cause = (failure as Error & { cause?: unknown }).cause;
-    const causeText = cause instanceof Error ? ` (${cause.message})` : "";
-    return `${failure.name}: ${failure.message}${causeText}`;
+  try {
+    if (failure instanceof Error) {
+      const cause = (failure as Error & { cause?: unknown }).cause;
+      const causeText = cause instanceof Error ? ` (${cause.message})` : "";
+      return `${failure.name}: ${failure.message}${causeText}`;
+    }
+    return String(failure);
+  } catch {
+    return "unprintable failure";
   }
-  return String(failure);
 }

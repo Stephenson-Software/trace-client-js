@@ -130,7 +130,7 @@ Besides `version`, `key`, `enabled` and `env`, the constructor's options take:
 | `fetch` | the global `fetch` | The `fetch` to send with, for a runtime that provides its own or for tests. |
 | `installId` | none | The installation's ID, sent as the tag `install`; see [above](#every-event-carries-a-random-installation-id). |
 | `installIdFile` | none | A file holding the installation's ID, created with a random UUID on first run by an enabled client. |
-| `debug` | none | Called with one line per dropped report, prefixed `[trace] `. A `debug` that throws is ignored. |
+| `debug` | none | Called with one line per dropped report, prefixed `[trace] `. A `debug` that throws, or an `async` one that rejects, is ignored; its promise is not waited for. |
 
 `flush(timeoutMs)` and `close(timeoutMs)` take their own bound, defaulting to
 the client's timeout; a negative or non-finite one counts as `0`, so they

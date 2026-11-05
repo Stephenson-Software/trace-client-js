@@ -634,6 +634,82 @@ describe("TraceClient", () => {
     await client.close();
   });
 
+  it("does not let a rejecting async debug sink become an unhandled rejection", async () => {
+    // Under Node's default, an unhandled rejection ends the host program.
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", listener);
+    try {
+      capture.replyStatus = 500;
+      let heard = 0;
+      const client = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
+        key: "k",
+        debug: async () => {
+          heard++;
+          throw new Error("logger exploded");
+        },
+      });
+      await client.report("startup");
+      await client.close();
+      await sleep(100); // unhandled rejections surface after the microtask queue drains
+      assert.equal(heard, 1, "the sink must still be called");
+      assert.deepEqual(unhandled, [], "a rejecting debug sink must be ignored, as a throwing one is");
+    } finally {
+      process.off("unhandledRejection", listener);
+    }
+  });
+
+  it("never throws or rejects, and gives back its slot, when a failure cannot be turned into a string", async () => {
+    const failures: unknown[] = [
+      Object.create(null),
+      {
+        toString(): never {
+          throw new Error("no string for you");
+        },
+      },
+      Object.defineProperty(new Error("hidden"), "message", {
+        get(): never {
+          throw new Error("no message for you");
+        },
+      }),
+    ];
+    const total = TraceClient.IN_FLIGHT_CAPACITY + 1;
+    for (const failure of failures) {
+      const hostile = {
+        toString(): never {
+          throw failure;
+        },
+      };
+      const serializing = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
+      await serializing.report("startup", { tags: { bad: hostile as unknown as string } }); // must not throw
+      await serializing.close();
+
+      let calls = 0;
+      const delivering = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
+        key: "k",
+        debug,
+        fetch: (async () => {
+          calls++;
+          throw failure;
+        }) as typeof fetch,
+      });
+      for (let i = 0; i < total; i++) await delivering.report("startup"); // must resolve
+      assert.equal(calls, total, "every report must reach fetch; a leaked slot would start dropping them");
+      await delivering.close();
+    }
+    assert.deepEqual(capture.requests, []);
+    assert.equal(
+      log.filter((line) => line === "[trace] could not serialize startup: unprintable failure").length,
+      failures.length,
+    );
+    assert.equal(
+      log.filter((line) => line.includes("could not deliver") && line.endsWith(": unprintable failure")).length,
+      failures.length * total,
+    );
+  });
+
   it("never throws or rejects in a runtime with no global fetch", async () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
     assert.ok(descriptor, "Node defines globalThis.fetch");
