@@ -127,7 +127,7 @@ Besides `version`, `key`, `enabled` and `env`, the constructor's options take:
 | Option | Default | Meaning |
 |---|---|---|
 | `timeoutMs` | `5000` | How long one request may take before it is aborted. Anything but a positive finite number — `0`, negative, `NaN`, `Infinity`, not a number — falls back to the default. A longer one than `2147483647` (about 24.8 days, the most a timer can hold) is held to that. |
-| `fetch` | the global `fetch` | The `fetch` to send with, for a runtime that provides its own or for tests. |
+| `fetch` | the global `fetch` | The `fetch` to send with, for a runtime that provides its own or for tests. One that ignores its abort signal is given up on at the timeout all the same, and anything it does later is discarded. |
 | `installId` | none | The installation's ID, sent as the tag `install`; see [above](#every-event-carries-a-random-installation-id). |
 | `installIdFile` | none | A file holding the installation's ID, created with a random UUID on first run by an enabled client. |
 | `debug` | none | Called with one line per dropped report, prefixed `[trace] `. A `debug` that throws, or an `async` one that rejects, is ignored; its promise is not waited for. |
