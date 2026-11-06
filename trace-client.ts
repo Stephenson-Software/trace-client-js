@@ -69,7 +69,10 @@ export interface TraceClientOptions {
    * Held to 2147483647 (about 24.8 days), the longest a timer can wait.
    */
   timeoutMs?: number;
-  /** The `fetch` to use. Default: the global one. */
+  /**
+   * The `fetch` to use. Default: the global one. One that ignores its abort
+   * signal is given up on at `timeoutMs` all the same.
+   */
   fetch?: typeof fetch;
   /** Receives one line per dropped report. Default: silence. A throw or rejection from it is ignored. */
   debug?: (message: string) => void;
@@ -415,23 +418,35 @@ export class TraceClient {
   private async send(body: string): Promise<void> {
     const doFetch = this.fetchImpl ?? fetch;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // The abort goes first, so a fetch that honours it reports its own failure.
+    // One that ignores it can no longer hold the slot: the attempt ends here,
+    // and whatever that fetch does later is discarded, its body unread.
+    const givenUp = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`no answer within ${this.timeoutMs}ms`));
+      }, this.timeoutMs);
+    });
     try {
-      const response = await doFetch(this.endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer " + this.key,
-          "User-Agent": `trace-client-js/${TRACE_CLIENT_VERSION} (${this.application})`,
-        },
-        body,
-        signal: controller.signal,
-      });
+      const response = await Promise.race([
+        doFetch(this.endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + this.key,
+            "User-Agent": `trace-client-js/${TRACE_CLIENT_VERSION} (${this.application})`,
+          },
+          body,
+          signal: controller.signal,
+        }),
+        givenUp,
+      ]);
       if (!response.ok) {
         this.log(`trace server answered ${response.status} for ${body}`);
       }
       // Let the connection be reused; never fail on an unreadable body.
-      await response.arrayBuffer().catch(() => undefined);
+      await Promise.race([response.arrayBuffer(), givenUp]).catch(() => undefined);
     } finally {
       clearTimeout(timer);
     }

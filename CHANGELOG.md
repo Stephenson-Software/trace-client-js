@@ -6,6 +6,13 @@ against this file to see what a re-vendor would bring.
 
 ## [Unreleased]
 
+- A request is now given up at `timeoutMs` whatever the `fetch` does. A
+  custom `fetch` that ignored its abort signal used to leave the `report()`
+  promise unsettled and keep its in-flight slot for good, so 256 of them
+  dropped every later report. It is now a logged drop, and a late answer or
+  failure from it is discarded, its body unread. A response body that never
+  ends no longer holds the slot either, and is not logged, since the server
+  has answered.
 - `report()` no longer throws or rejects when the failure it is logging
   cannot be turned into a string, such as an `Object.create(null)` thrown by
   a tag's `toString` or by a custom `fetch`. The rejecting case also kept

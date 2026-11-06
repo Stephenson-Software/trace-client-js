@@ -302,6 +302,81 @@ describe("TraceClient", () => {
     await client.close();
   });
 
+  it("gives up at the timeout when fetch ignores the abort, and frees every slot", { timeout: 15000 }, async () => {
+    // A wrapper that drops the signal: only the client's own timer can end these attempts.
+    let calls = 0;
+    const client = new TraceClient(baseUrl, "MyGame", {
+      version: "1.2.3",
+      key: "k",
+      timeoutMs: 300,
+      debug,
+      fetch: (() => {
+        calls++;
+        if (calls <= TraceClient.IN_FLIGHT_CAPACITY) return new Promise<Response>(() => {});
+        return Promise.resolve(new Response(null, { status: 201 }));
+      }) as typeof fetch,
+    });
+    const work: Promise<void>[] = [];
+    for (let i = 0; i < TraceClient.IN_FLIGHT_CAPACITY; i++) work.push(client.report("ignored-abort"));
+    await Promise.all(work); // report()'s promise settles when the attempt is given up
+    assert.equal(
+      log.filter((line) => line.includes("could not deliver")).length,
+      TraceClient.IN_FLIGHT_CAPACITY,
+      "every attempt given up is logged as a drop",
+    );
+    await client.report("after");
+    assert.equal(calls, TraceClient.IN_FLIGHT_CAPACITY + 1, "the slots must be free for the report after them");
+    assert.ok(!log.some((line) => line.includes("in-flight cap reached")), log.join("\n"));
+    await client.close();
+  });
+
+  it("discards an answer or a failure that arrives after the attempt was given up", { timeout: 15000 }, async () => {
+    const late: Array<{ answer: (response: Response) => void; fail: (failure: Error) => void }> = [];
+    const client = new TraceClient(baseUrl, "MyGame", {
+      version: "1.2.3",
+      key: "k",
+      timeoutMs: 200,
+      debug,
+      fetch: (() =>
+        new Promise<Response>((answer, fail) => {
+          late.push({ answer, fail });
+        })) as typeof fetch,
+    });
+    await Promise.all([client.report("answered-late"), client.report("failed-late")]);
+    assert.equal(log.length, 2, log.join("\n"));
+
+    let bodyRead = false;
+    const response = new Response(null, { status: 500 });
+    response.arrayBuffer = async () => {
+      bodyRead = true;
+      return new ArrayBuffer(0);
+    };
+    late[0].answer(response);
+    late[1].fail(new Error("too late")); // an unhandled rejection here would fail this test
+    await sleep(50);
+    assert.equal(bodyRead, false, "a late response's body must not be read");
+    assert.equal(log.length, 2, `a late result must not be logged as well: ${log.join("\n")}`);
+    await client.close();
+  });
+
+  it("stops waiting on a body that never ends, without calling the report dropped", { timeout: 15000 }, async () => {
+    // The server has answered by then, so this is not a failed delivery; an unreadable body never is.
+    const client = new TraceClient(baseUrl, "MyGame", {
+      version: "1.2.3",
+      key: "k",
+      timeoutMs: 200,
+      debug,
+      fetch: (async () => {
+        const response = new Response(null, { status: 201 });
+        response.arrayBuffer = () => new Promise<ArrayBuffer>(() => {});
+        return response;
+      }) as typeof fetch,
+    });
+    await client.report("startup");
+    assert.deepEqual(log, []);
+    await client.close();
+  });
+
   it("sends nothing when disabled or without a key", async () => {
     const clients = [
       new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", enabled: false }),
@@ -766,28 +841,30 @@ describe("TraceClient", () => {
   });
 
   it("flush() and close() with no argument wait at most the client's own timeout, even when fetch ignores the abort", async () => {
-    // A fetch that never settles, abort or not: only the drain's own bound can end the wait.
-    const client = new TraceClient(baseUrl, "MyGame", {
-      version: "1.2.3",
-      key: "k",
-      timeoutMs: 300,
-      fetch: (() => new Promise<Response>(() => {})) as typeof fetch,
-    });
-    client.report("startup");
+    // A fetch that never settles, abort or not. Each drain gets its own client: the
+    // attempt is given up at the timeout, which leaves a second drain nothing to wait on.
     for (const [label, drain] of [
-      ["flush()", () => client.flush()],
-      ["close()", () => client.close()],
+      ["flush()", (client: TraceClient) => client.flush()],
+      ["close()", (client: TraceClient) => client.close()],
     ] as const) {
+      const client = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
+        key: "k",
+        timeoutMs: 300,
+        fetch: (() => new Promise<Response>(() => {})) as typeof fetch,
+      });
+      client.report("startup");
       const before = Date.now();
-      await drain();
+      await drain(client);
       const elapsed = Date.now() - before;
       assert.ok(elapsed >= 250, `${label} took ${elapsed}ms; it must wait for in-flight work up to the timeout`);
       assert.ok(
         elapsed < 2000,
         `${label} took ${elapsed}ms; it must default to timeoutMs (300), not ${TraceClient.TIMEOUT_MS} or forever`,
       );
+      assert.equal(client.enabled, label === "flush()", "only close() turns the client off");
+      await client.close();
     }
-    assert.equal(client.enabled, false);
   });
 
   it("rejects a missing, blank or overlong version at construction", () => {
