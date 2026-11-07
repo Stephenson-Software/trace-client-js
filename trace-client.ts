@@ -445,8 +445,10 @@ export class TraceClient {
       if (!response.ok) {
         this.log(`trace server answered ${response.status} for ${body}`);
       }
-      // Let the connection be reused; never fail on an unreadable body.
-      await Promise.race([response.arrayBuffer(), givenUp]).catch(() => undefined);
+      // Let the connection be reused; never fail on an unreadable body. Called
+      // from an async function, so a read that throws is caught here as well.
+      const drained = (async () => response.arrayBuffer())();
+      await Promise.race([drained, givenUp]).catch(() => undefined);
     } finally {
       clearTimeout(timer);
     }
@@ -489,7 +491,7 @@ export function pagePath(urlOrPath: string): string {
 }
 
 const BOT_PATTERN =
-  /bot\b|bot[\/_-]|crawler|crawling|spider|slurp|curl\/|wget\/|python-requests|python-urllib|go-http-client|java\/|okhttp|libwww|httpclient|headlesschrome|lighthouse|pagespeed|uptimerobot|pingdom|statuscake|site24x7|monitor|facebookexternalhit|discordbot|twitterbot|telegrambot|whatsapp|slackbot|linkedinbot|embedly|quora link preview|bitlybot|skypeuripreview|nuzzel|vkshare|w3c_validator|redditbot|applebot|yandex|baiduspider|duckduckbot|bingpreview|semrush|ahrefs|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|claudebot|anthropic-ai|ccbot|perplexitybot|scrapy|axios\/|node-fetch|undici|postmanruntime|insomnia|httpie|phantomjs|selenium|puppeteer|playwright/i;
+  /(?<!cu)bot\b|(?<!cu)bot[\/_-]|crawler|crawling|spider|slurp|curl\/|wget\/|python-requests|python-urllib|go-http-client|java\/|okhttp|libwww|httpclient|headlesschrome|lighthouse|pagespeed|uptimerobot|pingdom|statuscake|site24x7|monitor|facebookexternalhit|discordbot|twitterbot|telegrambot|whatsapp|slackbot|linkedinbot|embedly|quora link preview|bitlybot|skypeuripreview|nuzzel|vkshare|w3c_validator|redditbot|applebot|yandex|baiduspider|duckduckbot|bingpreview|semrush|ahrefs|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|claudebot|anthropic-ai|ccbot|perplexitybot|scrapy|axios\/|node-fetch|undici|postmanruntime|insomnia|httpie|phantomjs|selenium|puppeteer|playwright/i;
 
 /**
  * Whether a User-Agent header belongs to a crawler, a monitor, or a script

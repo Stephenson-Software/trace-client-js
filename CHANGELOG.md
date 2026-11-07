@@ -6,6 +6,13 @@ against this file to see what a re-vendor would bring.
 
 ## [Unreleased]
 
+- A response whose body cannot be read no longer counts against the report,
+  however the read fails. A custom `fetch` whose response had no
+  `arrayBuffer`, or one that threw at once, used to log a delivered report
+  as `could not deliver`, and gave a non-`2xx` a second debug line.
+- `isBot()` no longer treats Cubot phones as bots. Model names such as
+  `CUBOT_X19` and `CUBOT NOTE 20 PRO` matched its generic `bot` patterns,
+  so page views from those phones went uncounted.
 - A request is now given up at `timeoutMs` whatever the `fetch` does. A
   custom `fetch` that ignored its abort signal used to leave the `report()`
   promise unsettled and keep its in-flight slot for good, so 256 of them

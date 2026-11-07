@@ -603,6 +603,43 @@ describe("TraceClient", () => {
     assert.deepEqual(log, [], "a 2xx is delivered; an unreadable body is not a failure");
   });
 
+  it("does not call a report dropped when reading the body throws, or cannot be done at all", async () => {
+    const responses = [
+      { ok: true, status: 200 },
+      {
+        ok: true,
+        status: 200,
+        arrayBuffer(): never {
+          throw new Error("body gone");
+        },
+      },
+    ];
+    for (const response of responses) {
+      const client = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
+        key: "k",
+        debug,
+        fetch: (async () => response) as unknown as typeof fetch,
+      });
+      await client.report("startup"); // must resolve
+      await client.close();
+    }
+    assert.deepEqual(log, [], "the server has answered, so a body that cannot be read is no failure");
+  });
+
+  it("gives a rejected report one debug line when its body cannot be read either", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", {
+      version: "1.2.3",
+      key: "k",
+      debug,
+      fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof fetch,
+    });
+    await client.report("startup"); // must resolve
+    await client.close();
+    assert.equal(log.length, 1, log.join("\n"));
+    assert.match(log[0], /answered 500/);
+  });
+
   it("names the cause of a failed delivery in the debug line", async () => {
     const failures: unknown[] = [
       new Error("fetch failed", { cause: new Error("connect ECONNREFUSED") }),
@@ -1408,6 +1445,9 @@ describe("isBot", () => {
     "Mozilla/5.0 (Android 14; Mobile; rv:125.0) Gecko/125.0 Firefox/125.0",
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/124.0.6367.111 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    // Cubot is a phone brand, so its model names end in or run on from "bot"
+    "Mozilla/5.0 (Linux; Android 9; CUBOT_X19) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; CUBOT NOTE 20 PRO) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
   ];
 
   it("recognises crawlers, monitors and scripts", () => {
