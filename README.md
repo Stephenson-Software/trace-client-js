@@ -8,7 +8,10 @@ whole library is one file, `trace-client.ts`, and the integration on the
 program side is meant to stay one call. It uses only `fetch`,
 `AbortController`, `setTimeout` and `URL` (plus `process.env` where the
 runtime has one), so it runs in Node 18+, in the Next.js Edge runtime, and
-anywhere else that has those four. The Python and
+anywhere else that has those four. The optional installation ID also uses
+`crypto.randomUUID` and `process.getBuiltinModule` when they are there, and
+does without them when they are not; see
+[below](#events-can-carry-a-random-installation-id). The Python and
 Java counterparts are
 [trace-client-python](https://github.com/Stephenson-Software/trace-client-python)
 and [trace-client-java](https://github.com/Stephenson-Software/trace-client-java);
@@ -46,7 +49,7 @@ constructor (the `version` from your `package.json`, or a constant the build
 fills in). The hand-added `version` tags can then be dropped if you
 like; left in, they still win, so nothing changes on the wire.
 
-## Every event carries a random installation ID
+## Events can carry a random installation ID
 
 Since 0.4.0, every event can also carry the tag `install`: a random ID for
 the installation, so the trace server can count **distinct installations**
@@ -128,7 +131,7 @@ Besides `version`, `key`, `enabled` and `env`, the constructor's options take:
 |---|---|---|
 | `timeoutMs` | `5000` | How long one request may take before it is aborted. Anything but a positive finite number — `0`, negative, `NaN`, `Infinity`, not a number — falls back to the default. A longer one than `2147483647` (about 24.8 days, the most a timer can hold) is held to that. |
 | `fetch` | the global `fetch` | The `fetch` to send with, for a runtime that provides its own or for tests. One that ignores its abort signal is given up on at the timeout all the same, and anything it does later is discarded. |
-| `installId` | none | The installation's ID, sent as the tag `install`; see [above](#every-event-carries-a-random-installation-id). |
+| `installId` | none | The installation's ID, sent as the tag `install`; see [above](#events-can-carry-a-random-installation-id). |
 | `installIdFile` | none | A file holding the installation's ID, created with a random UUID on first run by an enabled client. |
 | `debug` | none | Called with one line per dropped report, prefixed `[trace] `. A `debug` that throws, or an `async` one that rejects, is ignored; its promise is not waited for. |
 
@@ -254,6 +257,12 @@ enforces the "path only" part (query and fragment stripped, slashes normalised,
 capped at 200 characters), `isBot()` keeps crawlers, link previewers and
 uptime monitors out of the count, and the middleware above never reads
 anything else off the request.
+
+`pagePath()` always returns a path starting with `/`: one is added when it
+is missing, and a non-string or an absolute URL that cannot be parsed gives
+`/`. `isBot()` counts a request with a missing, empty or blank `User-Agent`
+as a bot, since every real browser sends one, so such requests are not
+reported as page views.
 
 **The opt-out.** Three environment variables, all optional, on top of
 `TRACE_USAGE_REPORTING` / `DO_NOT_TRACK` (which the client checks by itself):

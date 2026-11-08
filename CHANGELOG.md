@@ -51,6 +51,15 @@ against this file to see what a re-vendor would bring.
   infinities are. The `isBot()` doc comment now says a blank (all-space)
   User-Agent counts as a bot, as a missing or empty one does. Neither
   behavior changed.
+- The README now says that the optional installation ID uses
+  `crypto.randomUUID` and `process.getBuiltinModule` when the runtime has
+  them, and that an `install` tag is sent only when the program gives an
+  ID. The section heading that said every event carries one is now
+  "Events can carry a random installation ID". The README also says that
+  `isBot()` counts a missing or blank User-Agent as a bot, and that
+  `pagePath()` returns `/` for a non-string or an unparseable URL. The
+  `MAX_VERSION_LENGTH` doc comment now says it bounds `installId` too. No
+  behavior changed.
 
 ## 0.4.1 — 2026-10-05
 

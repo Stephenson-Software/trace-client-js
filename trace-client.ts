@@ -162,7 +162,7 @@ export interface ReportOptions {
 export class TraceClient {
   static readonly IN_FLIGHT_CAPACITY = 256;
   static readonly TIMEOUT_MS = 5000;
-  /** The longest program version accepted, after trimming. */
+  /** The longest program version, or `installId`, accepted after trimming. */
   static readonly MAX_VERSION_LENGTH = 255;
   /** The `install` tag is not added to an event that already has this many tags; its own tags are not capped. */
   static readonly MAX_TAGS = 32;
