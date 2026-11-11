@@ -1027,6 +1027,14 @@ describe("installation ID", () => {
     assert.equal(readFileSync(file, "utf8"), made + "\n");
   });
 
+  it("accepts an ID line of exactly 255 characters, the most a server-id line may hold", () => {
+    const file = join(dir, "id");
+    const longest = "a".repeat(255);
+    writeFileSync(file, "  " + longest + "  \n");
+    assert.equal(TraceClient.installIdFromFile(file), longest);
+    assert.equal(readFileSync(file, "utf8"), "  " + longest + "  \n", "a valid file is read, never rewritten");
+  });
+
   it("falls back to an in-memory ID when the file cannot be read or written, without throwing", () => {
     // A directory cannot be read as a file: left alone, not overwritten.
     const asDirectory = TraceClient.installIdFromFile(dir);
@@ -1240,6 +1248,16 @@ describe("environment opt-outs", () => {
       assert.equal(environmentOptsOut({ DO_NOT_TRACK: value }), false, `DO_NOT_TRACK=${value}`);
     }
     assert.equal(environmentOptsOut({}), false);
+  });
+
+  it("ignores an opt-out value that is not a string, as untyped code may pass", async () => {
+    for (const value of [1, true, 0, false, null, ["off"], { toString: () => "off" }]) {
+      const env = { TRACE_USAGE_REPORTING: value, DO_NOT_TRACK: value } as unknown as Record<string, string>;
+      assert.equal(environmentOptsOut(env), false, `a ${typeof value} is not one of the documented strings`);
+      const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env });
+      assert.equal(client.disabledReason, null, "the program's own setting stays in charge");
+      await client.close();
+    }
   });
 
   it("sends nothing and reports \"environment\" when TRACE_USAGE_REPORTING or DO_NOT_TRACK opts out", async () => {
