@@ -661,6 +661,28 @@ describe("TraceClient", () => {
     assert.ok(log.some((line) => line.includes("plain string failure")), log.join("\n"));
   });
 
+  it("names only an Error cause, one level deep, in the debug line", async () => {
+    const failures: unknown[] = [
+      new Error("fetch failed", { cause: "a string cause" }),
+      new Error("fetch failed", { cause: new Error("outer", { cause: new Error("inner") }) }),
+    ];
+    for (const failure of failures) {
+      const client = new TraceClient(baseUrl, "MyGame", {
+        version: "1.2.3",
+        key: "k",
+        debug,
+        fetch: (async () => {
+          throw failure;
+        }) as typeof fetch,
+      });
+      await client.report("startup"); // must resolve
+      await client.close();
+    }
+    assert.equal(log.length, 2, log.join("\n"));
+    assert.ok(log[0].endsWith("Error: fetch failed"), `a cause that is not an Error is left out: ${log[0]}`);
+    assert.ok(log[1].endsWith("Error: fetch failed (outer)"), `only the first cause is named: ${log[1]}`);
+  });
+
   it("gives each dropped report one debug line, prefixed [trace], naming the report or the body sent", async () => {
     const sent = (name: string) => JSON.stringify({ application: "MyGame", name, tags: { version: "1.2.3" } });
     const linesFrom = async (options: Partial<TraceClientOptions>, run: (client: TraceClient) => Promise<unknown>) => {
@@ -1392,6 +1414,12 @@ describe("pagePath", () => {
     assert.equal(pagePath(42 as unknown as string), "/");
     assert.equal(pagePath(null as unknown as string), "/");
     assert.equal(pagePath("http://[not-a-host/page?q=1"), "/");
+  });
+
+  it("keeps no credentials, host or port from an absolute URL, whatever the scheme's case", () => {
+    assert.equal(pagePath("https://user:secret@example.org:8443/account/?token=x"), "/account");
+    assert.equal(pagePath("HTTPS://Example.org/Blog/Hello"), "/Blog/Hello", "the path keeps its case");
+    assert.equal(pagePath("ftp://example.org/files/"), "/files");
   });
 });
 
