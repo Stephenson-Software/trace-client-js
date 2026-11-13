@@ -60,6 +60,11 @@ against this file to see what a re-vendor would bring.
   `pagePath()` returns `/` for a non-string or an unparseable URL. The
   `MAX_VERSION_LENGTH` doc comment now says it bounds `installId` too. No
   behavior changed.
+- The README and the `MAX_TAGS` doc comment now say that the 32-tag count
+  includes the `version` tag the client adds, so an event that passes 31
+  tags of its own goes without `install`. They also say that a `version`
+  that is not a string throws, and that an `installId` that is not a string
+  counts as none. No behavior changed.
 
 ## 0.4.1 — 2026-10-05
 

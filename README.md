@@ -36,7 +36,8 @@ await trace.close();
 
 The `version` option is the program's own version, and it is required
 (`TraceClientOptions.version` is typed `string`, not optional): a missing or
-blank one, or one over 255 characters after trimming, throws an `Error`. It
+blank one, one that is not a string, or one over 255 characters after
+trimming, throws an `Error`. It
 is trimmed, then sent as the tag `version` on every event the client sends
 — `startup`, `page-view`, `command`, anything else — so every event can be
 tied to a release, not just `startup`. An event that passes its own
@@ -81,7 +82,7 @@ const trace = new TraceClient(url, "my-game", {
 — or passes an ID it stores itself:
 
 ```ts
-new TraceClient(url, "my-game", { version, key, installId: settings.installId }); // null or blank: none sent
+new TraceClient(url, "my-game", { version, key, installId: settings.installId }); // null, blank or not a string: none sent
 ```
 
 `installIdFile` uses `TraceClient.installIdFromFile(path)`: the first line
@@ -97,7 +98,9 @@ characters throws, the same as `version`.
 `trace.installId` is the ID in use (`null` when disabled or when there is
 none), so a program can print it. An event that passes its own `install`
 tag keeps it, and the tag is not added to an event that already has 32 tags
-(`TraceClient.MAX_TAGS`).
+(`TraceClient.MAX_TAGS`). That count includes the `version` tag the client
+adds, so an event that passes 31 tags of its own, none of them `version`,
+goes without `install`.
 
 **Resetting it.** Delete the file (or its ID line); the next start writes a
 new one. Or put your own value in it.
@@ -153,8 +156,9 @@ conversion throws drops the whole report, with a `debug` line.
 
 The limits are also available as `TraceClient.TIMEOUT_MS` (5000),
 `TraceClient.IN_FLIGHT_CAPACITY` (256), `TraceClient.MAX_VERSION_LENGTH`
-(255, which bounds `installId` too) and `TraceClient.MAX_TAGS` (32, past
-which the `install` tag is not added; an event's own tags are not capped).
+(255, which bounds `installId` too) and `TraceClient.MAX_TAGS` (32, counting
+the `version` tag, past which the `install` tag is not added; an event's own
+tags are not capped).
 
 ## Turning it off from the environment
 

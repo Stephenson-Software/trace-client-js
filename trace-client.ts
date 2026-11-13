@@ -56,8 +56,9 @@ const MAX_TIMER_MS = 2147483647;
 export interface TraceClientOptions {
   /**
    * The program's own version, required. Sent as the tag `version` on every
-   * event; an event's own `version` tag wins. Trimmed; blank, missing, or
-   * longer than {@link TraceClient.MAX_VERSION_LENGTH} characters throws.
+   * event; an event's own `version` tag wins. Trimmed; blank, missing, not a
+   * string, or longer than {@link TraceClient.MAX_VERSION_LENGTH} characters
+   * throws.
    */
   version: string;
   /** The program's write key. Blank, missing or not a string yields a client that does nothing. */
@@ -87,8 +88,8 @@ export interface TraceClientOptions {
    * The installation's ID, sent as the tag `install` on every event so the
    * trace server can count installations rather than events. It should be
    * random -- e.g. a `crypto.randomUUID()` the program stores itself -- and
-   * never derived from a person, account or address. Trimmed; missing or
-   * blank means none; longer than {@link TraceClient.MAX_VERSION_LENGTH}
+   * never derived from a person, account or address. Trimmed; missing,
+   * blank or not a string means none; longer than {@link TraceClient.MAX_VERSION_LENGTH}
    * characters throws. Wins over `installIdFile`.
    */
   installId?: string | null;
@@ -164,7 +165,10 @@ export class TraceClient {
   static readonly TIMEOUT_MS = 5000;
   /** The longest program version, or `installId`, accepted after trimming. */
   static readonly MAX_VERSION_LENGTH = 255;
-  /** The `install` tag is not added to an event that already has this many tags; its own tags are not capped. */
+  /**
+   * The `install` tag is not added to an event that already has this many
+   * tags, counting the `version` tag the client adds; its own tags are not capped.
+   */
   static readonly MAX_TAGS = 32;
   /** The tag every event carries the installation's ID as. */
   static readonly INSTALL_TAG = "install";
