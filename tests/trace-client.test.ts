@@ -566,6 +566,19 @@ describe("TraceClient", () => {
     await client.close();
   });
 
+  it("sends the event with only the program version when untyped code passes null or a non-object as tags", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
+    for (const tags of [null, 42, "loose", true]) {
+      await client.report("startup", { tags: tags as unknown as Record<string, string> });
+    }
+    assert.equal(capture.requests.length, 4, "a tags value that is not an object is ignored, not a drop");
+    for (const request of capture.requests) {
+      assert.deepEqual(JSON.parse(request.body), { application: "MyGame", name: "startup", tags: { version: "1.2.3" } });
+    }
+    await client.close();
+    assert.deepEqual(log, [], "ignoring a non-object tags value is not a serialize failure");
+  });
+
   it("drops a report whose tags cannot be serialized, without throwing", async () => {
     const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", debug });
     const hostile = {

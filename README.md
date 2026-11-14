@@ -152,7 +152,9 @@ blank or non-string `name`.
 
 Tag values are cleaned before sending: `null` and `undefined` values are
 left out, and anything else is converted with `String()`. A value whose
-conversion throws drops the whole report, with a `debug` line.
+conversion throws drops the whole report, with a `debug` line. A `tags`
+that is not an object at all (`null`, a string, a number, from untyped
+code) is ignored, and the event is sent with only the client's own tags.
 
 The limits are also available as `TraceClient.TIMEOUT_MS` (5000),
 `TraceClient.IN_FLIGHT_CAPACITY` (256), `TraceClient.MAX_VERSION_LENGTH`
