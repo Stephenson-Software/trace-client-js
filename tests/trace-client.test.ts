@@ -1184,6 +1184,19 @@ describe("installation ID", () => {
     await client.close();
   });
 
+  it("sends every one of an event's own tags past the cap, plus version, without the install tag", async () => {
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.0", key: "k", installId: "mine" });
+    const many: Record<string, string> = {};
+    for (let i = 0; i < TraceClient.MAX_TAGS + 8; i++) many["t" + i] = String(i);
+    await client.report("many", { tags: many });
+    const sent = tagsOf(0);
+    assert.equal(Object.keys(sent).length, TraceClient.MAX_TAGS + 9, "an event's own tags are not capped");
+    for (const [key, value] of Object.entries(many)) assert.equal(sent[key], value);
+    assert.equal(sent.version, "1.0", "the version tag is added whatever the count");
+    assert.equal(sent.install, undefined, "only the install tag is held back by the cap");
+    await client.close();
+  });
+
   it("keeps the ID in memory where the runtime has no getBuiltinModule", () => {
     const file = join(dir, "install-id");
     const original = process.getBuiltinModule;
