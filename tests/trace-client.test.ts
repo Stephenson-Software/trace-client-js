@@ -1209,6 +1209,44 @@ describe("installation ID", () => {
     assert.equal(existsSync(file), false);
   });
 
+  it("keeps the ID in memory where getBuiltinModule throws or has no node:fs", () => {
+    const file = join(dir, "install-id");
+    const original = process.getBuiltinModule;
+    const standIns = [
+      (): never => {
+        throw new Error("not allowed here");
+      },
+      (): undefined => undefined,
+    ];
+    try {
+      for (const standIn of standIns) {
+        (process as { getBuiltinModule?: unknown }).getBuiltinModule = standIn;
+        const first = TraceClient.installIdFromFile(file);
+        assert.match(first, UUID);
+        assert.notEqual(TraceClient.installIdFromFile(file), first, "nothing persisted, so a new one each call");
+      }
+    } finally {
+      process.getBuiltinModule = original;
+    }
+    assert.equal(existsSync(file), false, "without node:fs nothing is written");
+  });
+
+  it("writes a new ID, kept from then on, to a file emptied or stripped of its ID line", () => {
+    // What the README's "Resetting it" promises: delete the ID line and the next start writes a new one.
+    const file = join(dir, "install-id");
+    const first = TraceClient.installIdFromFile(file);
+    for (const reset of ["", "\n", "# reset by hand\n"]) {
+      writeFileSync(file, reset);
+      const made = TraceClient.installIdFromFile(file);
+      assert.match(made, UUID, `file=${JSON.stringify(reset)}`);
+      assert.notEqual(made, first, "a reset gives a new ID");
+      assert.equal(readFileSync(file, "utf8"), made + "\n");
+      assert.equal(TraceClient.installIdFromFile(file), made, "and the next start reuses it");
+    }
+    writeFileSync(file, "my-own-id\n");
+    assert.equal(TraceClient.installIdFromFile(file), "my-own-id", "a value put in by hand is used as is");
+  });
+
   it("makes a UUID-shaped ID without throwing where crypto.randomUUID is missing or throws", () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
     assert.ok(descriptor, "Node defines globalThis.crypto");
