@@ -6,6 +6,28 @@ against this file to see what a re-vendor would bring.
 
 ## [Unreleased]
 
+Version 0.5.0 in the source. Every opt-out now fails closed, so an
+operator's opt-out can never be read as consent (the counterpart of
+trace-client-java 0.8.0):
+
+- `TRACE_USAGE_REPORTING` set to anything but blank, `true`, `on`, `yes` or
+  `1` now turns reporting off. Only `off`, `false`, `0` and `no` did before,
+  so `disabled` or a typo left reporting on.
+- `DO_NOT_TRACK` set to anything but blank, `0`, `false`, `off` or `no` now
+  turns reporting off. Only `1`, `true` and `yes` did before.
+- An environment that cannot be read (reading `process.env` throws, or an
+  `env` whose lookups throw) now counts as opting out; it used to opt
+  nothing out. So does an `env` value that is not a string. A runtime with
+  no `process` or no `process.env` still opts nothing out.
+- The `enabled` option, when given, now keeps reporting on only for `true`
+  or a string `true`/`on`/`yes`/`1` (any case). Only `false` turned it off
+  before, so `enabled: "false"`, `null`, `undefined` or `0` from untyped code
+  or a config file left reporting on. Left out, it still defaults to on.
+- New `TraceClient.allowsReporting(value)` reads a program's own setting the
+  same way. The README examples use it in place of
+  `process.env.USAGE_REPORTING_ENABLED !== "false"`, which read `off`,
+  `FALSE` or a typo as on; programs that copied that line should switch.
+
 - A response whose body cannot be read no longer counts against the report,
   however the read fails. A custom `fetch` whose response had no
   `arrayBuffer`, or one that threw at once, used to log a delivered report
