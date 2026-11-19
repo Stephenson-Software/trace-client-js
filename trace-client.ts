@@ -1,5 +1,5 @@
 /**
- * trace-client 0.4.1 -- https://github.com/Stephenson-Software/trace-client-js
+ * trace-client 0.5.0 -- https://github.com/Stephenson-Software/trace-client-js
  *
  * One call to report that a program was used. Copy this file into a project
  * as is; there is nothing else to add. Zero dependencies and no Node-only
@@ -13,7 +13,7 @@
  * MIT licensed. Keep this header when vendoring so the file can be found again.
  */
 
-export const TRACE_CLIENT_VERSION = "0.4.1";
+export const TRACE_CLIENT_VERSION = "0.5.0";
 
 // Everything added since 0.1.0 hangs off TraceClient (static members) rather
 // than being a new top-level export, so the file's exported values stay
@@ -26,8 +26,8 @@ export type DisabledReason = "environment" | "config" | "no key";
 /** An environment to read the opt-outs from: `process.env`, or a stand-in. */
 export type Environment = Readonly<Record<string, string | undefined>>;
 
-const OFF_VALUES = ["off", "false", "0", "no"];
-const DO_NOT_TRACK_VALUES = ["1", "true", "yes"];
+const ON_VALUES = ["true", "on", "yes", "1"];
+const NEGATIVE_VALUES = ["false", "off", "no", "0"];
 
 // Declared here rather than taken from @types/node so the file still
 // type-checks against ES2022 + DOM alone; at runtime `process` may simply not
@@ -63,8 +63,14 @@ export interface TraceClientOptions {
   version: string;
   /** The program's write key. Blank, missing or not a string yields a client that does nothing. */
   key?: string;
-  /** The opt-out switch. `false` yields a client that does nothing. Default `true`. */
-  enabled?: boolean;
+  /**
+   * The program's own switch. Fails closed: only `true`, or a string reading
+   * `true`, `on`, `yes` or `1` (any case), leaves reporting on; anything else
+   * given -- `false`, `"false"`, `"off"`, a typo, a number, `null`,
+   * `undefined` -- yields a client that does nothing. Default (option left
+   * out) `true`. See {@link TraceClient.allowsReporting}.
+   */
+  enabled?: boolean | string | null;
   /**
    * Per-request timeout in milliseconds. Default {@link TraceClient.TIMEOUT_MS}.
    * Held to 2147483647 (about 24.8 days), the longest a timer can wait.
@@ -131,6 +137,8 @@ export interface ReportOptions {
  * nothing and costs nothing. So does the environment: the constructor checks
  * `TRACE_USAGE_REPORTING=off` and `DO_NOT_TRACK=1` before it looks at
  * `enabled`, so a user can switch off every trace-reporting program at once.
+ * Every switch fails closed: a value that does not clearly mean "on" turns
+ * reporting off, and nothing in this client turns a switch back on.
  * {@link disabledReason} says which of those applied (`"environment"`,
  * `"config"` or `"no key"`; `null` when on) so the program can say so in its
  * notice. Programs that run on other people's machines should expose that
@@ -152,7 +160,7 @@ export interface ReportOptions {
  * const trace = new TraceClient("https://trace.example.org", "my-site", {
  *   version: "1.4.0",
  *   key: process.env.USAGE_REPORTING_KEY,
- *   enabled: process.env.USAGE_REPORTING_ENABLED !== "false",
+ *   enabled: TraceClient.allowsReporting(process.env.USAGE_REPORTING_ENABLED ?? true),
  * });
  * if (!trace.enabled) console.log(`Usage reporting is off (${trace.disabledReason}).`);
  * trace.report("startup"); // tagged version=1.4.0
@@ -175,39 +183,59 @@ export class TraceClient {
 
   /**
    * Environment variables that turn reporting off for every program using a
-   * trace client, checked before the program's own setting:
-   * `TRACE_USAGE_REPORTING=off` (also `false`, `0`, `no`; case and
-   * surrounding space do not matter) or `DO_NOT_TRACK=1` (also `true`, `yes`;
-   * see https://consoledonottrack.com). Any other value, including an empty
-   * one, leaves the program's own setting in charge.
+   * trace client, checked before the program's own setting. Both fail closed:
+   * `TRACE_USAGE_REPORTING` set to anything but blank, `true`, `on`, `yes` or
+   * `1` turns reporting off (so `off`, `false`, `0`, `no`, `disabled`, a
+   * typo, ...), and so does `DO_NOT_TRACK` set to anything but blank, `0`,
+   * `false`, `off` or `no` (so `1`, `true`, `yes`, ...; see
+   * https://consoledonottrack.com). Case and surrounding space do not
+   * matter. Unset or blank leaves the program's own setting in charge.
    */
   static readonly ENV_TRACE_USAGE_REPORTING = "TRACE_USAGE_REPORTING";
   static readonly ENV_DO_NOT_TRACK = "DO_NOT_TRACK";
 
   /** {@link disabledReason} when `TRACE_USAGE_REPORTING` or `DO_NOT_TRACK` opted out. */
   static readonly REASON_ENVIRONMENT = "environment";
-  /** {@link disabledReason} when the program passed `enabled: false`. */
+  /** {@link disabledReason} when the program's `enabled` was not clearly on. */
   static readonly REASON_CONFIG = "config";
   /** {@link disabledReason} when the key was missing, blank or not a string. */
   static readonly REASON_NO_KEY = "no key";
 
   /**
-   * Whether the environment asks for usage reporting to be off, via
-   * `TRACE_USAGE_REPORTING=off` or `DO_NOT_TRACK=1`. Reads `env` when given,
-   * otherwise `process.env` if the runtime has one; never throws, and a
-   * runtime without an environment opts nothing out.
+   * Whether the environment asks for usage reporting to be off: see
+   * {@link ENV_TRACE_USAGE_REPORTING}. Reads `env` when given, otherwise
+   * `process.env` if the runtime has one; a runtime with no environment at
+   * all opts nothing out. Never throws, and fails closed: an environment
+   * that cannot be read, or a value in it that is not a string, opts out --
+   * it may hold `DO_NOT_TRACK=1`.
    */
   static environmentOptsOut(env?: Environment): boolean {
-    let trace: unknown;
-    let doNotTrack: unknown;
     try {
       const source = env ?? processEnvironment();
-      trace = source[TraceClient.ENV_TRACE_USAGE_REPORTING];
-      doNotTrack = source[TraceClient.ENV_DO_NOT_TRACK];
+      const trace = setting(source[TraceClient.ENV_TRACE_USAGE_REPORTING]);
+      if (trace !== "" && !ON_VALUES.includes(trace)) return true;
+      const doNotTrack = setting(source[TraceClient.ENV_DO_NOT_TRACK]);
+      return doNotTrack !== "" && !NEGATIVE_VALUES.includes(doNotTrack);
     } catch {
-      return false; // an environment that cannot be read opts nothing out
+      return true; // an environment that cannot be read may say DO_NOT_TRACK=1
     }
-    return matches(trace, OFF_VALUES) || matches(doNotTrack, DO_NOT_TRACK_VALUES);
+  }
+
+  /**
+   * Whether a program's own reporting setting, as read from its
+   * configuration, allows reporting -- for the `enabled` option. Fails
+   * closed: only `true`, or a string reading `true`, `on`, `yes` or `1` (any
+   * case, surrounding space ignored), allows it. Anything else turns
+   * reporting off: `false`, `"false"`, `"off"`, `"no"`, a typo, a number,
+   * `null`, `undefined` (a missing setting), a quoted `'"false"'`.
+   *
+   * Pass the raw value. A comparison such as `value !== "false"` reads a
+   * typo, `"off"` or `"FALSE"` as on. To keep reporting on when the setting
+   * is absent, say so: `allowsReporting(process.env.X ?? true)`.
+   */
+  static allowsReporting(setting: unknown): boolean {
+    if (typeof setting === "boolean") return setting;
+    return typeof setting === "string" && ON_VALUES.includes(setting.trim().toLowerCase());
   }
 
   private readonly endpoint: string;
@@ -256,7 +284,7 @@ export class TraceClient {
     // Decided once, here: the environment, then the program's switch, then the key.
     if (TraceClient.environmentOptsOut(options.env)) {
       this.reason = TraceClient.REASON_ENVIRONMENT;
-    } else if (options.enabled === false) {
+    } else if ("enabled" in options && !TraceClient.allowsReporting(options.enabled)) {
       this.reason = TraceClient.REASON_CONFIG;
     } else if (this.key === "") {
       this.reason = TraceClient.REASON_NO_KEY;
@@ -335,7 +363,7 @@ export class TraceClient {
 
   /**
    * Why this client reports nothing: `"environment"` (`TRACE_USAGE_REPORTING`
-   * / `DO_NOT_TRACK`), `"config"` (`enabled: false`) or `"no key"`; `null`
+   * / `DO_NOT_TRACK`), `"config"` (`enabled` not clearly on) or `"no key"`; `null`
    * when it reports. Fixed at construction; {@link close} does not change it.
    */
   get disabledReason(): DisabledReason | null {
@@ -511,24 +539,28 @@ export function isBot(userAgent: string | null | undefined): boolean {
 
 /**
  * The two opt-out variables from `process.env`, or an empty environment where
- * there is no `process` (or reading it throws, as a permission-gated runtime
- * may). Each is read by its literal name, which is what lets bundlers such as
+ * there is no `process` or it has no `env`. Throws when reading it throws (a
+ * permission-gated runtime), which environmentOptsOut takes as an opt-out.
+ * Each is read by its literal name, which is what lets bundlers such as
  * Next.js inline it for the Edge runtime.
  */
 function processEnvironment(): Environment {
-  try {
-    if (typeof process === "undefined" || !process || !process.env) return {};
-    return {
-      TRACE_USAGE_REPORTING: process.env.TRACE_USAGE_REPORTING,
-      DO_NOT_TRACK: process.env.DO_NOT_TRACK,
-    };
-  } catch {
-    return {};
-  }
+  if (typeof process === "undefined" || !process || !process.env) return {};
+  return {
+    TRACE_USAGE_REPORTING: process.env.TRACE_USAGE_REPORTING,
+    DO_NOT_TRACK: process.env.DO_NOT_TRACK,
+  };
 }
 
-function matches(value: unknown, accepted: readonly string[]): boolean {
-  return typeof value === "string" && accepted.includes(value.trim().toLowerCase());
+/**
+ * An environment variable's value, trimmed and lower-cased; `""` when unset.
+ * Throws for a value that is not a string, which environmentOptsOut takes as
+ * an opt-out.
+ */
+function setting(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new TypeError("not a string");
+  return value.trim().toLowerCase();
 }
 
 /**

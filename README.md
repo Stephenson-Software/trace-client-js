@@ -23,7 +23,7 @@ import { TraceClient } from "./trace-client";
 const trace = new TraceClient("https://trace.danielstephenson.dev", "my-site", {
   version: "1.4.0", // the program's own version, required -- see below
   key: process.env.USAGE_REPORTING_KEY,
-  enabled: process.env.USAGE_REPORTING_ENABLED !== "false",
+  enabled: TraceClient.allowsReporting(process.env.USAGE_REPORTING_ENABLED ?? true),
 });
 trace.report("startup"); // tagged version=1.4.0, like every other event
 trace.report("world-load", { value: 2.5, tags: { kind: "procedural" } });
@@ -122,7 +122,15 @@ regardless; pass the path as `installIdFile` to keep that guarantee.)
 
 Reporting is **opt-out**: `enabled: false`, or no key at all, yields a client
 that does nothing and costs nothing (`TraceClient.disabled()` is a ready-made
-one). A program that runs on other people's machines should expose that switch
+one). **Every switch fails closed:** a value that does not clearly mean "on" —
+a typo, `"false"` or `"off"` as a string, an empty value, `null` — turns
+reporting off, and nothing in this client ever turns a switch back on.
+`enabled` keeps reporting on only for `true` or a string `true`/`on`/`yes`/`1`
+(any case); left out, it defaults to on. Read the program's own setting with
+`TraceClient.allowsReporting(value)`, which fails closed the same way —
+`allowsReporting(process.env.USAGE_REPORTING_ENABLED ?? true)` keeps reporting
+on when the variable is unset and turns it off for any value but a clear "on".
+Avoid `value !== "false"`: it reads `off`, `FALSE` or a typo as on. A program that runs on other people's machines should expose that switch
 in its settings — and say so once, so whoever runs it knows it is on and where
 to turn it off.
 
@@ -169,16 +177,18 @@ client — this one, trace-client-python and trace-client-java alike — and
 they are checked before the program's own `enabled` setting and before the
 key:
 
-| Variable | Values that turn reporting off |
+| Variable | Turns reporting off when set to |
 |---|---|
-| `TRACE_USAGE_REPORTING` | `off`, `false`, `0`, `no` |
-| `DO_NOT_TRACK` | `1`, `true`, `yes` ([consoledonottrack.com](https://consoledonottrack.com)) |
+| `TRACE_USAGE_REPORTING` | anything but blank, `true`, `on`, `yes` or `1` — so `off`, `false`, `0`, `no`, `disabled`, a typo, … |
+| `DO_NOT_TRACK` | anything but blank, `0`, `false`, `off` or `no` — so `1`, `true`, `yes`, … ([consoledonottrack.com](https://consoledonottrack.com)) |
 
-Case and surrounding space are ignored; any other value, or none, leaves the
-program's own setting in charge. The client reads them from `process.env`
-when the runtime has one (by their literal names, so Next.js can inline them
-into the Edge runtime); a runtime without `process`, or whose environment
-cannot be read, simply opts nothing out. Pass `env` to use another source:
+Both fail closed. Case and surrounding space are ignored; an unset or blank
+variable leaves the program's own setting in charge. The client reads them
+from `process.env` when the runtime has one (by their literal names, so
+Next.js can inline them into the Edge runtime). A runtime without `process`
+(or without `process.env`) has no environment and opts nothing out; one whose
+environment cannot be read (reading it throws), or an `env` holding a value
+that is not a string, counts as opting out. Pass `env` to use another source:
 
 ```ts
 // Cloudflare Workers and other runtimes that hand the environment to the handler
@@ -191,7 +201,7 @@ this order — so a program can say so in its startup notice:
 | `disabledReason` | Cause |
 |---|---|
 | `"environment"` | `TRACE_USAGE_REPORTING` or `DO_NOT_TRACK` above |
-| `"config"` | `enabled: false` |
+| `"config"` | `enabled` given and not `true` or a string `true`/`on`/`yes`/`1` |
 | `"no key"` | the key was missing, blank or not a string |
 | `null` | the client reports |
 
@@ -236,7 +246,7 @@ const trace = new TraceClient(
     version: "1.4.0",
     // The key shipped with the site is an identity, not a secret -- see "Keys".
     key: process.env.USAGE_REPORTING_KEY ?? "tk_my-site_xxxxxxxxxxxxxxxxxxxxxxxx",
-    enabled: process.env.USAGE_REPORTING_ENABLED !== "false",
+    enabled: TraceClient.allowsReporting(process.env.USAGE_REPORTING_ENABLED ?? true),
   },
 );
 
@@ -275,7 +285,7 @@ reported as page views.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `USAGE_REPORTING_ENABLED` | `true` | Set to `false` to turn reporting off entirely. |
+| `USAGE_REPORTING_ENABLED` | `true` | Set to anything but `true`, `on`, `yes` or `1` (e.g. `false`) to turn reporting off entirely. |
 | `USAGE_REPORTING_ENDPOINT` | the shared trace server | Point at your own trace server instead. |
 | `USAGE_REPORTING_KEY` | the key shipped in the repo | Report as a different program. |
 
@@ -286,7 +296,7 @@ site can flip `USAGE_REPORTING_ENABLED=false` and nothing is sent.
 ## The wire format
 
 `POST {baseUrl}/api/metrics` with `Content-Type: application/json`,
-`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.4.1 (<application>)`
+`Authorization: Bearer <key>`, `User-Agent: trace-client-js/0.5.0 (<application>)`
 and a body of
 
 ```json

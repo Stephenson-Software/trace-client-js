@@ -1286,7 +1286,7 @@ describe("API shape", () => {
     assert.equal(await client.flush(50), undefined);
     assert.equal(await client.close(50), undefined);
     assert.equal(TraceClient.disabled().enabled, false);
-    assert.equal(TRACE_CLIENT_VERSION, "0.4.1");
+    assert.equal(TRACE_CLIENT_VERSION, "0.5.0");
   });
 
   it("keeps the documented values of its public constants, which the Python and Java clients share", () => {
@@ -1327,23 +1327,82 @@ describe("environment opt-outs", () => {
     for (const value of ["1", "true", "yes", "TRUE", " Yes "]) {
       assert.equal(environmentOptsOut({ DO_NOT_TRACK: value }), true, `DO_NOT_TRACK=${value}`);
     }
-    for (const value of ["", "on", "true", "1", "yes", "disabled"]) {
+    for (const value of ["", "  ", "on", "true", "1", "yes", "TRUE", " On "]) {
       assert.equal(environmentOptsOut({ TRACE_USAGE_REPORTING: value }), false, `TRACE_USAGE_REPORTING=${value}`);
     }
-    for (const value of ["", "0", "false", "no", "off"]) {
+    for (const value of ["", "  ", "0", "false", "no", "off", " No ", "OFF"]) {
       assert.equal(environmentOptsOut({ DO_NOT_TRACK: value }), false, `DO_NOT_TRACK=${value}`);
     }
     assert.equal(environmentOptsOut({}), false);
+    assert.equal(environmentOptsOut({ TRACE_USAGE_REPORTING: undefined, DO_NOT_TRACK: undefined }), false);
   });
 
-  it("ignores an opt-out value that is not a string, as untyped code may pass", async () => {
-    for (const value of [1, true, 0, false, null, ["off"], { toString: () => "off" }]) {
-      const env = { TRACE_USAGE_REPORTING: value, DO_NOT_TRACK: value } as unknown as Record<string, string>;
-      assert.equal(environmentOptsOut(env), false, `a ${typeof value} is not one of the documented strings`);
-      const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env });
-      assert.equal(client.disabledReason, null, "the program's own setting stays in charge");
+  it("fails closed: TRACE_USAGE_REPORTING set to anything but a clear on opts out", async () => {
+    for (const value of ["disabled", "of", "nope", "2", "-1", "ture", "none", "never", '"true"']) {
+      assert.equal(environmentOptsOut({ TRACE_USAGE_REPORTING: value }), true, `TRACE_USAGE_REPORTING=${value}`);
+      const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: { TRACE_USAGE_REPORTING: value } });
+      assert.equal(client.disabledReason, REASON_ENVIRONMENT, `TRACE_USAGE_REPORTING=${value}`);
+      await client.report("startup");
+    }
+    await sleep(100);
+    assert.deepEqual(capture.requests, []);
+  });
+
+  it("fails closed: DO_NOT_TRACK set to anything but a clear no opts out", async () => {
+    for (const value of ["on", "2", "y", "enabled", "please", "nein"]) {
+      assert.equal(environmentOptsOut({ DO_NOT_TRACK: value }), true, `DO_NOT_TRACK=${value}`);
+      const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: { DO_NOT_TRACK: value } });
+      assert.equal(client.disabledReason, REASON_ENVIRONMENT, `DO_NOT_TRACK=${value}`);
+      await client.report("startup");
+    }
+    await sleep(100);
+    assert.deepEqual(capture.requests, []);
+  });
+
+  it("an opt-out value that is not a string, as untyped code may pass, opts out", async () => {
+    for (const value of [1, true, 0, false, ["off"], { toString: () => "on" }]) {
+      for (const name of OPT_OUT_VARIABLES) {
+        const env = { [name]: value } as unknown as Record<string, string>;
+        assert.equal(environmentOptsOut(env), true, `${name} as a ${typeof value} fails closed`);
+        const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env });
+        assert.equal(client.disabledReason, REASON_ENVIRONMENT);
+        await client.close();
+      }
+    }
+    const nulls = { TRACE_USAGE_REPORTING: null, DO_NOT_TRACK: null } as unknown as Record<string, string>;
+    assert.equal(environmentOptsOut(nulls), false, "null is unset");
+  });
+
+  it("allowsReporting is true only for true or a clear on string", () => {
+    for (const value of [true, "true", "on", "yes", "1", "TRUE", " On ", "Yes\n"]) {
+      assert.equal(TraceClient.allowsReporting(value), true, JSON.stringify(value));
+    }
+    for (const value of [false, null, undefined, "false", "off", "no", "0", "", "  ", "ture", '"false"', '"true"',
+      "disabled", 1, 0, 1n, NaN, [], ["true"], { enabled: true }, { toString: () => "true" }, new String("true"),
+      new Boolean(true), Symbol("true")]) {
+      assert.equal(TraceClient.allowsReporting(value), false, String(typeof value === "symbol" ? "symbol" : value));
+    }
+  });
+
+  it("reads the enabled option through allowsReporting when it is given", async () => {
+    for (const value of ["false", "off", "no", '"false"', "ture", null, undefined, 0, 1, "0"]) {
+      const options = { version: "1.2.3", key: "k", env: {}, enabled: value } as unknown as TraceClientOptions;
+      const client = new TraceClient(baseUrl, "MyGame", options);
+      assert.equal(client.enabled, false, `enabled: ${String(value)} must not report`);
+      assert.equal(client.disabledReason, REASON_CONFIG, String(value));
+      await client.report("startup");
+    }
+    await sleep(100);
+    assert.deepEqual(capture.requests, []);
+    for (const value of [true, "true", " ON ", "yes", "1"]) {
+      const options = { version: "1.2.3", key: "k", env: {}, enabled: value } as unknown as TraceClientOptions;
+      const client = new TraceClient(baseUrl, "MyGame", options);
+      assert.equal(client.disabledReason, null, `enabled: ${String(value)} reports`);
       await client.close();
     }
+    const unsaid = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: {} });
+    assert.equal(unsaid.disabledReason, null, "enabled left out defaults to on");
+    await unsaid.close();
   });
 
   it("sends nothing and reports \"environment\" when TRACE_USAGE_REPORTING or DO_NOT_TRACK opts out", async () => {
@@ -1428,24 +1487,26 @@ describe("environment opt-outs", () => {
     } finally {
       Object.defineProperty(globalThis, "process", descriptor);
     }
-    assert.equal(noProcess, false);
-    assert.equal(throwingEnv, false);
+    assert.equal(noProcess, false, "no process: no environment, nothing opted out");
+    assert.equal(throwingEnv, true, "an environment that cannot be read may say DO_NOT_TRACK=1");
+    assert.deepEqual(built.map((client) => client.disabledReason), [null, REASON_ENVIRONMENT, null]);
     for (const client of built) {
-      assert.equal(client.disabledReason, null);
       await client.report("startup");
       await client.close();
     }
-    assert.equal(capture.requests.length, built.length);
+    assert.equal(capture.requests.length, 2, "the client whose environment could not be read sent nothing");
   });
 
-  it("an env whose lookups throw opts nothing out and does not escape", () => {
+  it("an env whose lookups throw opts out and does not escape", () => {
     const hostile = new Proxy({}, {
       get(): never {
         throw new Error("no");
       },
     });
-    assert.equal(environmentOptsOut(hostile), false);
-    assert.equal(new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: hostile }).disabledReason, null);
+    assert.equal(environmentOptsOut(hostile), true);
+    const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: hostile });
+    assert.equal(client.disabledReason, REASON_ENVIRONMENT);
+    assert.equal(client.enabled, false);
   });
 });
 
