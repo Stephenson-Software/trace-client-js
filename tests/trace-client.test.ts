@@ -1429,6 +1429,26 @@ describe("environment opt-outs", () => {
     assert.equal(TraceClient.disabled().disabledReason, REASON_CONFIG);
   });
 
+  it("never lets a clear on turn another switch's opt-out back on", async () => {
+    for (const on of ["on", "true", "yes", "1", " TRUE "]) {
+      const env = { TRACE_USAGE_REPORTING: on, DO_NOT_TRACK: "1" };
+      assert.equal(environmentOptsOut(env), true, `TRACE_USAGE_REPORTING=${on} must not undo DO_NOT_TRACK=1`);
+      const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env });
+      assert.equal(client.disabledReason, REASON_ENVIRONMENT, `TRACE_USAGE_REPORTING=${on}`);
+      await client.report("startup");
+    }
+    for (const env of [{ TRACE_USAGE_REPORTING: "off" }, { DO_NOT_TRACK: "1" }]) {
+      for (const enabled of [true, "true", "on", "yes", "1"]) {
+        const client = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", enabled, env });
+        assert.equal(client.enabled, false, `enabled: ${String(enabled)} must not undo ${JSON.stringify(env)}`);
+        assert.equal(client.disabledReason, REASON_ENVIRONMENT);
+        await client.report("startup");
+      }
+    }
+    await sleep(100);
+    assert.deepEqual(capture.requests, [], "an opted-out client sends nothing, whatever the other switches say");
+  });
+
   it("reports null as the reason when on, and keeps the build reason after close()", async () => {
     const on = new TraceClient(baseUrl, "MyGame", { version: "1.2.3", key: "k", env: {} });
     assert.equal(on.disabledReason, null);
