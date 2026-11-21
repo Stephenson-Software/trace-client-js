@@ -332,6 +332,10 @@ port, which can be told to hang or to answer `401`/`500`. The type-check
 deliberately has no Node types available: if `trace-client.ts` compiles
 against `ES2022` + `DOM` alone, it uses nothing the Edge runtime lacks.
 
+The install-ID file fixtures in `tests/install-id-fixtures` (with what the
+loader does to each in `expected.txt`) are frozen once released: never edit
+or delete one. A new case is a new fixture plus its line in `expected.txt`.
+
 ## License
 
 MIT.

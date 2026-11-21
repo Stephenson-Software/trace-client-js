@@ -1286,7 +1286,8 @@ describe("API shape", () => {
     assert.equal(await client.flush(50), undefined);
     assert.equal(await client.close(50), undefined);
     assert.equal(TraceClient.disabled().enabled, false);
-    assert.equal(TRACE_CLIENT_VERSION, "0.5.0");
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+    assert.equal(TRACE_CLIENT_VERSION, packageJson.version);
   });
 
   it("keeps the documented values of its public constants, which the Python and Java clients share", () => {
